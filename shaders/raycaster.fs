@@ -137,7 +137,6 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
 void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS, in vec2 worldPos, in vec2 normal, in float wallType)
 {
    vec3 vViewTS   = normalize(o_vViewTS);
-   //vec3 vLightTS  = normalize(o_vLightTS);
 
    // Nombre de layers adaptatif
    float numLayers = mix(float(g_nMaxSamples), float(g_nMinSamples), 
@@ -186,7 +185,7 @@ void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_
 
    // interpolation of texture coordinates
    vec2 finalTexCoords = prevTCoords * weight + currentTextureCoords * (1.0-weight);
-   finalTexCoords = clamp( finalTexCoords,  vec2(0.001),  vec2(0.999) );
+   //finalTexCoords = clamp( finalTexCoords,  vec2(0.001),  vec2(0.999) );
 
    // interpolation of depth values
    float parallaxHeight = curLayerHeight + prevH * weight + nextH * (1.0 - weight);
@@ -251,8 +250,10 @@ void main()
    if(d.side==1 && d.normal.y<0) faceSign=-1.0f;
    if(d.side==1 && d.normal.y>0) faceSign= 1.0f;
 
-   float signedOffsetHorizontal = faceSign * (dot(V, tangent) > 0.0 ? 1.0 : -1.0) * clamp(abs((viewTS.x / max(abs(viewTS.z), 0.1)) * parallaxScale), 0.0, 0.3);
-   float offsetVertical = (viewTS.y / viewTS.z) * parallaxScale;
+   //float signedOffsetHorizontal = faceSign * (dot(V, tangent) > 0.0 ? 1.0 : -1.0) * clamp(abs((viewTS.x / max(abs(viewTS.z), 0.1)) * parallaxScale), 0.0, 0.3);
+   float localSafeZ = max(abs(viewTS.z), 0.05);
+   float signedOffsetHorizontal = faceSign * (viewTS.x / localSafeZ) * parallaxScale;
+   //float offsetVertical = (viewTS.y / viewTS.z) * parallaxScale;
 
    //vec2 parallaxOffset = vec2(signedOffsetHorizontal, offsetVertical);
    vec2 parallaxOffset = vec2(signedOffsetHorizontal, 0.0);

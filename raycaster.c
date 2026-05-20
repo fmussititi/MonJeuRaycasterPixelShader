@@ -33,10 +33,10 @@ int renderW, renderH, halfRenderH;
 #define RAYCASTER_TYPE 1 // RAYMARCHING = 0 / DDA = 1
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
-#define TEX_TILE 1.0f
+#define TEX_TILE 2.0f
 #define SHADOW_STEPS 8
-#define PARALLAX_STEPS_MIN 64
-#define PARALLAX_STEPS_MAX 180
+#define PARALLAX_STEPS_MIN 100
+#define PARALLAX_STEPS_MAX 250
 #define PARALLAX_SCALE 0.25f
 #define NUM_THREADS 8
 
