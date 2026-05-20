@@ -27,17 +27,17 @@ int renderW, renderH, halfRenderH;
 #define FOV          (PI / 3)   // 60 degrés
 
 // ------ Parametres de qualite/performance du rendu ------
-#define RENDER_SCALE 1.5 // 1 = natif, 2 = moitié, 4 = quart
+#define RENDER_SCALE 1.0 // 1 = natif, 2 = moitié, 4 = quart
 #define COL_STEP 1
 #define FXAA 0
 #define RAYCASTER_TYPE 1 // RAYMARCHING = 0 / DDA = 1
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
-#define TEX_TILE 2.0f
+#define TEX_TILE 1.0f
 #define SHADOW_STEPS 8
 #define PARALLAX_STEPS_MIN 100
 #define PARALLAX_STEPS_MAX 250
-#define PARALLAX_SCALE 0.25f
+#define PARALLAX_SCALE 0.15f
 #define NUM_THREADS 8
 
 // ----- Carte du labyrinthe -----
@@ -51,7 +51,7 @@ int renderW, renderH, halfRenderH;
 #define PATROL_LIGHTS  (NUM_LIGHTS - 1)
 #define AMBIENT_LIGHT 0.03f
 #define TORCHE_RADIUS 1.8f
-#define TORCHE_PUISSANCE 1.5f
+#define TORCHE_PUISSANCE 1.0f
 #define TORCHE_DISTANCE 0.5f
 
 // Paramètres bloom des sprites light patrols

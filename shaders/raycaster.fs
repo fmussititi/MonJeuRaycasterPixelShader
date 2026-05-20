@@ -86,8 +86,60 @@ vec3 ApplyWallTypeTint(vec3 c, float wallType)
     return c;
 }
 
+float parallaxSoftShadowMultiplier(in vec3 L, in vec2 initialTexCoord, 
+                                    in float initialHeight, in vec2 parallaxOffset)
+{
+    float shadowMultiplier = 1.0;
+
+    if (dot(vec3(0, 0, 1), L) > 0.0)
+    {
+        float numSamplesUnderSurface = 0.0;
+        shadowMultiplier = 0.0;
+
+        float numLayers   = mix(float(g_nMaxSamples), float(g_nMinSamples), 
+                               abs(dot(vec3(0, 0, 1), L)));
+        float layerHeight = initialHeight / numLayers;
+
+        // Step de la lumière proportionnel au parallax offset
+        float lightAngle = max(L.z, 0.01);
+        vec2 texStep = vec2(L.x, -L.y) * length(parallaxOffset) 
+                       / (numLayers * lightAngle);
+
+        float currentLayerHeight   = initialHeight - layerHeight;
+        vec2  currentTextureCoords = initialTexCoord + texStep;
+        float heightFromTexture    = texture(u_heightTexture, currentTextureCoords).r;
+        int   stepIndex            = 1;
+
+        for (int i = 0; i < g_nMaxSamples; i++)
+        {
+            if (currentLayerHeight <= 0.0) break;
+
+            if (heightFromTexture < currentLayerHeight)
+            {
+                numSamplesUnderSurface += 1.0;
+                float newShadow = (currentLayerHeight - heightFromTexture) *
+                                  (1.0 - float(stepIndex) / numLayers);
+                shadowMultiplier = max(shadowMultiplier, newShadow);
+            }
+
+            stepIndex            += 1;
+            currentLayerHeight   -= layerHeight;
+            currentTextureCoords += texStep;
+            heightFromTexture     = texture(u_heightTexture, currentTextureCoords).r;
+        }
+
+        if (numSamplesUnderSurface < 1.0)
+            shadowMultiplier = 1.0;
+        else
+            shadowMultiplier = 1.0 - shadowMultiplier;
+    }
+
+    return shadowMultiplier;
+}
+
+
 // Equivalent de ComputeIllumination
-vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 normal, in float wallType)
+vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 normal, in float wallType, in float shadows[MAX_LIGHTS])
 {
    vec3 vNormal  = texture(u_normalTexture, texSample).rgb * 2.0 - 1.0;
    vNormal.xy   *= normalStrength;
@@ -95,7 +147,7 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
 
    vec3 vDiffuse = texture(u_diffuseTexture, texSample).rgb;
    vDiffuse = ApplyWallTypeTint(vDiffuse, wallType);
-   vec3 outColor = vec3(0.08) * vDiffuse;  // ambient
+   vec3 outColor = vec3(0.03) * vDiffuse;  // ambient
 
    vec2 tangent = vec2(-normal.y, normal.x);
 
@@ -124,10 +176,19 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
 
       vec3 vViewTSN = normalize(vViewTS);
       vec3 vHalf    = normalize(vLightTS + vViewTSN);
-      float spec    = pow(max(0.0, dot(vNormal, vHalf)), 32.0) * 0.3;
 
-      outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0;
-      outColor += vec3(spec) * atten * lightColor[i];
+      // Shininess — plus élevé = reflet plus petit et net, plus bas = reflet large et doux
+      float shininess = 4.0;  // 32 = brillant, 4-8 = mat/rugueux
+
+      // Puissance du spec — multiplicateur de l'intensité
+      float specStrength = 0.01;  // 0.3 = fort, 0.05-0.1 = subtil
+      float spec = pow(max(0.0, dot(vNormal, vHalf)), shininess) * specStrength;
+
+      //outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0;
+      //outColor += vec3(spec) * atten * lightColor[i];
+      float shadow = pow(shadows[i], 4.0);
+      outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0 * shadow;
+      outColor += vec3(spec) * atten * lightColor[i] * shadow;
    }   
 
    return vec4(clamp(outColor, 0.0, 1.0), 1.0);
@@ -190,16 +251,23 @@ void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_
    // interpolation of depth values
    float parallaxHeight = curLayerHeight + prevH * weight + nextH * (1.0 - weight);
 
-   // Self-shadow
-   //float shadowMultiplier = parallaxSoftShadowMultiplier(
-   //   vLightTS, 
-   //   finalTexCoords,          // UV après déplacement parallax
-   //   parallaxHeight           // hauteur à l'intersection
-   //);
+   // Self-shadow par lumière
+   vec2 tangent = vec2(-normal.y, normal.x);
+   float shadows[MAX_LIGHTS];
 
-   float shadowMultiplier = 1;
+   for (int i = 0; i < MAX_LIGHTS; i++)
+   {
+      if (i >= numLights) { shadows[i] = 1.0; continue; }
 
-   resultingColor = ComputeIllumination(finalTexCoords, vViewTS, worldPos, normal, wallType);
+      vec2 L2 = lightPos[i].xy - worldPos;
+      vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
+      vLightTS.z = abs(vLightTS.z);
+
+      //shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
+      shadows[i] = 1;
+   }
+
+   resultingColor = ComputeIllumination(finalTexCoords, vViewTS, worldPos, normal, wallType, shadows);
 }
 
 
@@ -253,10 +321,10 @@ void main()
    //float signedOffsetHorizontal = faceSign * (dot(V, tangent) > 0.0 ? 1.0 : -1.0) * clamp(abs((viewTS.x / max(abs(viewTS.z), 0.1)) * parallaxScale), 0.0, 0.3);
    float localSafeZ = max(abs(viewTS.z), 0.05);
    float signedOffsetHorizontal = faceSign * (viewTS.x / localSafeZ) * parallaxScale;
-   //float offsetVertical = (viewTS.y / viewTS.z) * parallaxScale;
+   float offsetVertical = (viewTS.y / localSafeZ) * parallaxScale;
 
-   //vec2 parallaxOffset = vec2(signedOffsetHorizontal, offsetVertical);
-   vec2 parallaxOffset = vec2(signedOffsetHorizontal, 0.0);
+   vec2 parallaxOffset = vec2(signedOffsetHorizontal, offsetVertical);
+   //vec2 parallaxOffset = vec2(signedOffsetHorizontal, 0.0);
 
    parallaxOcclusionMapping(vec2(d.texX, texY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
    //resultingColor= texture( u_diffuseTexture, vec2(d.texX,texY));
