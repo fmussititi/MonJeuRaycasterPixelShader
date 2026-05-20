@@ -27,16 +27,16 @@ int renderW, renderH, halfRenderH;
 #define FOV          (PI / 3)   // 60 degrés
 
 // ------ Parametres de qualite/performance du rendu ------
-#define RENDER_SCALE 1.5 // 1 = natif, 2 = moitié, 4 = quart
+#define RENDER_SCALE 1.0 // 1 = natif, 2 = moitié, 4 = quart
 #define COL_STEP 1
 #define FXAA 0
 #define RAYCASTER_TYPE 1 // RAYMARCHING = 0 / DDA = 1
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
 #define TEX_TILE 2.0f
-#define PARALLAX_STEPS_MIN 100
-#define PARALLAX_STEPS_MAX 250
-#define PARALLAX_SCALE 0.095f
+#define PARALLAX_STEPS_MIN 64
+#define PARALLAX_STEPS_MAX 150
+#define PARALLAX_SCALE 0.1f
 
 // ----- Carte du labyrinthe -----
 // 1 = mur, 0 = couloir
@@ -48,9 +48,9 @@ int renderW, renderH, halfRenderH;
 #define NUM_LIGHTS  3
 #define PATROL_LIGHTS  (NUM_LIGHTS - 1)
 #define AMBIENT_LIGHT 0.03f
-#define TORCHE_RADIUS 3.8f
-#define TORCHE_PUISSANCE 0.5f
-#define TORCHE_DISTANCE 0.5f
+#define TORCHE_RADIUS 2.5f
+#define TORCHE_PUISSANCE 0.8f
+#define TORCHE_DISTANCE 0.3f
 
 // Paramètres bloom des sprites light patrols
 #define BLOOM_PASSES  7      // nombre de passes (1 = pas de bloom)
@@ -1296,7 +1296,7 @@ void KeysAndJoypadHandler(float* angle, float* px, float* py, float dt)
     if (IsKeyDown(KEY_KP_SUBTRACT)) parallaxScale -= 0.01f;
 
     if (parallaxScale < 0.0f) parallaxScale = 0.0f;
-    if (parallaxScale > 2.0f) parallaxScale = 2.0f;
+    if (parallaxScale > 1.3f) parallaxScale = 1.3f;
 
     if (IsKeyDown(KEY_KP_DIVIDE)) normalStrength -= 0.1f;
     if (IsKeyDown(KEY_KP_MULTIPLY)) normalStrength += 0.1f;
@@ -1991,9 +1991,9 @@ int main(void)
     shader.locs[SHADER_LOC_MAP_NORMAL]    = GetShaderLocation(shader, "u_normalTexture");
     shader.locs[SHADER_LOC_MAP_ROUGHNESS] = GetShaderLocation(shader, "u_heightTexture");
 
-    SetTextureFilter(texDiffuse, TEXTURE_FILTER_POINT);
-    SetTextureFilter(texNormal,  TEXTURE_FILTER_POINT);
-    SetTextureFilter(texHeight,  TEXTURE_FILTER_POINT);
+    SetTextureFilter(texDiffuse, TEXTURE_FILTER_TRILINEAR);
+    SetTextureFilter(texNormal,  TEXTURE_FILTER_TRILINEAR);
+    SetTextureFilter(texHeight,  TEXTURE_FILTER_TRILINEAR);
     
     SetTextureWrap(texDiffuse, TEXTURE_WRAP_REPEAT);
     SetTextureWrap(texNormal, TEXTURE_WRAP_REPEAT);
@@ -2010,6 +2010,7 @@ int main(void)
     int locResolution      = GetShaderLocation(shader, "resolution");
     int locHorizon         = GetShaderLocation(shader, "horizon");
     int locParallaxScale   = GetShaderLocation(shader, "parallaxScale");
+    int locAmbientLight    = GetShaderLocation(shader, "ambientLight");
     int locMinSamples      = GetShaderLocation(shader, "g_nMinSamples");
     int locMaxSamples      = GetShaderLocation(shader, "g_nMaxSamples");
     int locTiling          = GetShaderLocation(shader, "tiling");
@@ -2080,14 +2081,15 @@ int main(void)
         BeginDrawing();
 
         float res[2] = {renderW, renderH};
-        SetShaderValue(shader, locWallData,         (int[1]){4},                 SHADER_UNIFORM_INT);
-        SetShaderValue(shader, locResolution, res,                               SHADER_UNIFORM_VEC2);
-        SetShaderValueV(shader, locLightPos,    lightPositions,                  SHADER_UNIFORM_VEC3,  NUM_LIGHTS);
-        SetShaderValueV(shader, locLightColor,  lightColors,                     SHADER_UNIFORM_VEC3,  NUM_LIGHTS);
-        SetShaderValueV(shader, locLightRadius, lightRadii,                      SHADER_UNIFORM_FLOAT, NUM_LIGHTS);
-        SetShaderValue (shader, locNumLights,   &numLights,                      SHADER_UNIFORM_INT);
+        SetShaderValue(shader, locWallData,      (int[1]){4},                    SHADER_UNIFORM_INT);
+        SetShaderValue(shader, locResolution,    res,                            SHADER_UNIFORM_VEC2);
+        SetShaderValueV(shader, locLightPos,     lightPositions,                 SHADER_UNIFORM_VEC3,  NUM_LIGHTS);
+        SetShaderValueV(shader, locLightColor,   lightColors,                    SHADER_UNIFORM_VEC3,  NUM_LIGHTS);
+        SetShaderValueV(shader, locLightRadius,  lightRadii,                     SHADER_UNIFORM_FLOAT, NUM_LIGHTS);
+        SetShaderValue (shader, locNumLights,    &numLights,                     SHADER_UNIFORM_INT);
         SetShaderValue(shader, locHorizon,       (float[1]){5},                  SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, locParallaxScale, &parallaxScale,                 SHADER_UNIFORM_FLOAT);
+        SetShaderValue(shader, locAmbientLight,  (float[1]){AMBIENT_LIGHT},      SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, locMinSamples,    (int[1]){PARALLAX_STEPS_MIN},   SHADER_UNIFORM_INT);
         SetShaderValue(shader, locMaxSamples,    (int[1]){PARALLAX_STEPS_MAX},   SHADER_UNIFORM_INT);
         SetShaderValue(shader, locNormalStrength, &normalStrength,               SHADER_UNIFORM_FLOAT);

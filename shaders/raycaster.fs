@@ -19,6 +19,7 @@ uniform float normalStrength;
 uniform vec2 tiling;
 uniform vec2 playerPos;
 uniform float parallaxScale;
+uniform float ambientLight;
 
 #define MAX_LIGHTS 3
 
@@ -147,7 +148,8 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
 
    vec3 vDiffuse = texture(u_diffuseTexture, texSample).rgb;
    vDiffuse = ApplyWallTypeTint(vDiffuse, wallType);
-   vec3 outColor = vec3(0.03) * vDiffuse;  // ambient
+
+   vec3 outColor = vec3(ambientLight) * vDiffuse;  // ambient
 
    vec2 tangent = vec2(-normal.y, normal.x);
 
