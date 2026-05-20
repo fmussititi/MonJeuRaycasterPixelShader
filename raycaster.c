@@ -27,18 +27,16 @@ int renderW, renderH, halfRenderH;
 #define FOV          (PI / 3)   // 60 degrés
 
 // ------ Parametres de qualite/performance du rendu ------
-#define RENDER_SCALE 1.0 // 1 = natif, 2 = moitié, 4 = quart
+#define RENDER_SCALE 1.5 // 1 = natif, 2 = moitié, 4 = quart
 #define COL_STEP 1
 #define FXAA 0
 #define RAYCASTER_TYPE 1 // RAYMARCHING = 0 / DDA = 1
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
-#define TEX_TILE 1.0f
-#define SHADOW_STEPS 8
+#define TEX_TILE 2.0f
 #define PARALLAX_STEPS_MIN 100
 #define PARALLAX_STEPS_MAX 250
-#define PARALLAX_SCALE 0.15f
-#define NUM_THREADS 8
+#define PARALLAX_SCALE 0.095f
 
 // ----- Carte du labyrinthe -----
 // 1 = mur, 0 = couloir
@@ -50,8 +48,8 @@ int renderW, renderH, halfRenderH;
 #define NUM_LIGHTS  3
 #define PATROL_LIGHTS  (NUM_LIGHTS - 1)
 #define AMBIENT_LIGHT 0.03f
-#define TORCHE_RADIUS 1.8f
-#define TORCHE_PUISSANCE 1.0f
+#define TORCHE_RADIUS 3.8f
+#define TORCHE_PUISSANCE 0.5f
 #define TORCHE_DISTANCE 0.5f
 
 // Paramètres bloom des sprites light patrols
@@ -78,6 +76,7 @@ bool playSoundOneTime = true;
 bool playBeepSound = true;
 float pulseRadius = 0.0f;
 float parallaxScale = PARALLAX_SCALE;
+float normalStrength = 2.0f;
 
 typedef enum { STATE_PLAY, STATE_WIN, STATE_LOST, STATE_LOST_BY_CHASING, STATE_MAZE_NOT_READY } GameState;
 GameState gameState = STATE_PLAY;
@@ -167,23 +166,6 @@ typedef struct {
 Sprite sprites[PATROL_LIGHTS];    // une par lumière patrouille
 Light tmpLightColor[NUM_LIGHTS] = {0};
 
-typedef struct
-{
-    Context* ctx;
-
-    int startX;
-    int endX;
-
-    float px;
-    float py;
-    float angle;
-
-    int horizon;
-
-} RenderThreadData;
-
-RenderThreadData td[NUM_THREADS];
-Context* gctx;
 
 // ---------------- Prototypes de fonction ----------------------------
 void ShuffleDirections(int *array, int n);
@@ -209,10 +191,8 @@ void ComputeDeadEndBranches(void);
 void AnimLights(float px, float py, float angle, float dt);
 void GState(GameState gameState, float* px, float* py, Sound tada, Sound siren);
 void RenderSprites(Context* ctx, float px, float py, float angle);
-void RenderWalls(Context* ctx, int startX, int endX, float px, float py, float angle, int horizon);
 void RenderFloorCeil(Context* ctx, float px, float py, float angle, int horizon);
-static inline Color SampleBilinear(Color* tex, int texW, int texH,  float u, float v);
-static inline float SampleHeight(Color* tex, int texW, int texH, float u, float v);
+float* RenderWallPixelShader(Context* ctx, float px, float py, float angle, float* rayOffset, int horizon);
 void InitLUT(void);
 static inline float LUTsin(float angle);
 static inline float LUTcos(float angle);
@@ -220,76 +200,6 @@ float FastInvSqrt(float x);
 // --------------------------------------------------------------------
 
 #pragma region UTILES
-/*
-static inline Color SampleBilinear(Color* tex, int texW, int texH, float u, float v)
-{
-    u -= floorf(u);
-    v -= floorf(v);
-
-    float xf = u * texW;
-    float yf = v * texH;
-
-    int x0 = (int)xf;
-    int y0 = (int)yf;
-
-    float fx = xf - x0;
-    float fy = yf - y0;
-
-    int x1 = (x0 + 1 < texW) ? x0 + 1 : 0;
-    int y1 = (y0 + 1 < texH) ? y0 + 1 : 0;
-
-    // x0/y0 ne peuvent pas dépasser texW/texH car u,v sont dans [0,1)
-    // après floorf, donc xf < texW et yf < texH strictement
-
-    Color c00 = tex[y0 * texW + x0];
-    Color c10 = tex[y0 * texW + x1];
-    Color c01 = tex[y1 * texW + x0];
-    Color c11 = tex[y1 * texW + x1];
-
-    float r = c00.r*(1-fx)*(1-fy) + c10.r*fx*(1-fy) + c01.r*(1-fx)*fy + c11.r*fx*fy;
-    float g = c00.g*(1-fx)*(1-fy) + c10.g*fx*(1-fy) + c01.g*(1-fx)*fy + c11.g*fx*fy;
-    float b = c00.b*(1-fx)*(1-fy) + c10.b*fx*(1-fy) + c01.b*(1-fx)*fy + c11.b*fx*fy;
-
-    return (Color){ (unsigned char)r, (unsigned char)g, (unsigned char)b, 255 };
-}
-*/
-
-static inline Color SampleBilinear(Color* tex, int texW, int texH, float u, float v)
-{
-    u -= floorf(u);
-    v -= floorf(v);
-
-    int x0 = (int)(u * texW);          // évite le *( texW-1) + remapping
-    int y0 = (int)(v * texH);
-    float fx = u * texW - x0;
-    float fy = v * texH - y0;
-
-    // Clamp avec masque (branchless)
-    int x1 = x0 + 1; if (x1 >= texW) x1 = 0;   // wrap plutôt que clamp → meilleure cohérence avec fmodf
-    int y1 = y0 + 1; if (y1 >= texH) y1 = 0;
-
-    Color c00 = tex[y0 * texW + x0];
-    Color c10 = tex[y0 * texW + x1];
-    Color c01 = tex[y1 * texW + x0];
-    Color c11 = tex[y1 * texW + x1];
-
-    //int ifx = (int)(fx * 256);         // virgule fixe Q8 → évite 6 multiplications float
-    //int ify = (int)(fy * 256);
-    //int ifxi = 256 - ifx;
-    //int ifyi = 256 - ify;
-
-    int ifx  = (int)(fx * 256); if (ifx  > 255) ifx  = 255;
-    int ify  = (int)(fy * 256); if (ify  > 255) ify  = 255;
-    int ifxi = 256 - ifx;
-    int ifyi = 256 - ify;
-
-    Color out;
-    out.r = (unsigned char)(((c00.r*ifxi + c10.r*ifx)*ifyi + (c01.r*ifxi + c11.r*ifx)*ify) >> 16);
-    out.g = (unsigned char)(((c00.g*ifxi + c10.g*ifx)*ifyi + (c01.g*ifxi + c11.g*ifx)*ify) >> 16);
-    out.b = (unsigned char)(((c00.b*ifxi + c10.b*ifx)*ifyi + (c01.b*ifxi + c11.b*ifx)*ify) >> 16);
-    out.a = 255;
-    return out;
-}
 
 float FastInvSqrt(float x) {
     float xhalf = 0.5f * x;
@@ -328,17 +238,6 @@ static inline float LUTcos(float angle)
     if (angle < 0) angle += 2.0f * PI;
     int idx = (int)(angle * LUT_SIZE / (2.0f * PI)) & (LUT_SIZE - 1);
     return cosLUT[idx];
-}
-
-
-static inline Color MixColor(Color a, Color b, float t)
-{
-    return (Color){
-        (unsigned char)(a.r + (b.r - a.r) * t),
-        (unsigned char)(a.g + (b.g - a.g) * t),
-        (unsigned char)(a.b + (b.b - a.b) * t),
-        255
-    };
 }
 
 void ResetGame(float *px, float *py)
@@ -922,7 +821,8 @@ RayHit cast_ray_dda(float px, float py, float angle, float player_angle)
 
     if (MAP[my][mx] == 2) hit.wallType = 2;
 
-    hit.texX  = fmodf(hitX * TEX_TILE, 1.0f);
+    //hit.texX  = fmodf(hitX * TEX_TILE, 1.0f);
+    hit.texX  = hitX;
 
     float euc = hit.dist / LUTcos(angle - player_angle);
 
@@ -1054,7 +954,8 @@ RayHit cast_ray_raymarching(float px, float py, float ray_angle, float player_an
     }
 
     hitX -= floorf(hitX);
-    hit.texX = fmodf(hitX * TEX_TILE, 1.0f);
+    //hit.texX = fmodf(hitX * TEX_TILE, 1.0f);
+    hit.texX = hitX;
 
     hit.side = (fabsf(hit.nx) > 0.5f) ? 0 : 1;
 
@@ -1396,280 +1297,17 @@ void KeysAndJoypadHandler(float* angle, float* px, float* py, float dt)
 
     if (parallaxScale < 0.0f) parallaxScale = 0.0f;
     if (parallaxScale > 2.0f) parallaxScale = 2.0f;
+
+    if (IsKeyDown(KEY_KP_DIVIDE)) normalStrength -= 0.1f;
+    if (IsKeyDown(KEY_KP_MULTIPLY)) normalStrength += 0.1f;
+
+    if (normalStrength < 0.0f) normalStrength = 0.0f;
+    if (normalStrength > 2.0f) normalStrength = 2.0f;
 }
 #pragma endregion
 
 
 #pragma region RENDU
-
-static inline float SampleHeight(Color* tex, int texW, int texH, float u, float v)
-{
-    u -= floorf(u);
-    v -= floorf(v);
-
-    int x = (int)(u * texW);
-    int y = (int)(v * texH);
-
-    if (x >= texW) x = texW - 1;
-    if (y >= texH) y = texH - 1;
-
-    return tex[y * texW + x].r / 255.0f;
-}
-
-// =============================================================
-//  Fonction de rendu à utiliser dans RenderFrame
-// =============================================================
-
-void RenderWalls(Context* ctx, int startX, int endX, float px, float py, float angle, int horizon)
-{
-    for (int col = startX; col < endX; col += COL_STEP)
-    {
-        float ray_angle = angle + (col - renderW / 2.0f) * (FOV / renderW);
-
-        #if RAYCASTER_TYPE
-            RayHit hit = cast_ray_dda(px, py, ray_angle, angle);
-        #else
-            RayHit hit = cast_ray_raymarching(px, py, ray_angle, angle);
-        #endif
-
-        ctx->zBuffer[col] = hit.dist;
-        for (int step = 1; step < COL_STEP && (col + step) < renderW; step++)
-            ctx->zBuffer[col + step] = hit.dist;
-
-        int wall_h_real = (int)(renderH / hit.dist);
-        int wall_top    = horizon - wall_h_real / 2;
-        int wall_bot    = horizon + wall_h_real / 2;
-        int draw_top    = wall_top < 0       ? 0       : wall_top;
-        int draw_bot    = wall_bot > renderH ? renderH : wall_bot;
-
-        // ── Pré-calcul lumières ──────────────────────────────────────────
-        typedef struct { float ldx, ldy, ldz, atten, r, g, b; int active; } LightContrib;
-        LightContrib lc[8];
-        for (int i = 0; i < numLights; i++) {
-            lc[i].active = 0;
-            float ldx   = lights[i].x - hit.wx;
-            float ldy   = lights[i].y - hit.wy;
-            float dist2 = ldx*ldx + ldy*ldy;
-            if (dist2 > lights[i].radius * lights[i].radius) continue;
-
-            float dist = dist2 * FastInvSqrt(dist2);
-            float invLenL = FastInvSqrt(dist2 + 0.25f); // 0.5f * 0.5f = 0.25f
-
-            lc[i].ldx = ldx * invLenL;
-            lc[i].ldy = ldy * invLenL;
-            lc[i].ldz = 0.5f * invLenL;
-            lc[i].r   = lights[i].r;
-            lc[i].g   = lights[i].g;
-            lc[i].b   = lights[i].b;
-
-            float Kc = 1.0f;
-            float Kl = 2.0f / lights[i].radius;
-            float Kq = 7.0f / (lights[i].radius * lights[i].radius);
-            float atten = 1.0f / (Kc + Kl * dist + Kq * dist2);
-            float fade  = 1.0f - (dist / lights[i].radius);
-            lc[i].atten  = atten * (fade > 0.0f ? fade : 0.0f);
-            lc[i].active = 1;
-        }
-
-        // ── [OPTIMISATION COLONNE] Pré-calculs POM Horizontaux ───────────
-        // vue pixel -> espace caméra (composantes X et Z constantes sur la colonne)
-        float viewX = LUTcos(ray_angle);
-        float viewZ = LUTsin(ray_angle);
-
-        // Tangente depuis la normale stockée dans hit
-        float tangentX = -hit.ny;
-        float tangentZ =  hit.nx;
-
-        // Tangent space (X et Z constants sur la colonne)
-        float vViewTS_x = viewX * tangentX + viewZ * tangentZ;
-        float vViewTS_z = viewX * hit.nx   + viewZ * hit.ny;
-
-        float faceSignX = 1.0f;
-        if (hit.side == 0 && hit.nx < 0) faceSignX =  1.0f;
-        if (hit.side == 0 && hit.nx > 0) faceSignX = -1.0f;
-        if (hit.side == 1 && hit.ny < 0) faceSignX = -1.0f;  
-        if (hit.side == 1 && hit.ny > 0) faceSignX =  1.0f;  
-
-        float faceSignY = -1.0f;
-        float safeZ = fmaxf(fabsf(vViewTS_z), 0.05f);
-
-        typedef struct { float x; float y; } Vec2;
-
-        // ── Boucle pixel ────────────────────────────────────────────────
-        for (int y = draw_top; y < draw_bot; y++)
-        {
-            float texPos = fmodf((float)(y - wall_top) / (float)wall_h_real * TEX_TILE, 1.0f);
-
-            // ── Steep Parallax Occlusion Mapping réorienté ────────────────
-            float screenY = ((float)y - (wall_top + wall_h_real * 0.5f)) / (wall_h_real * 0.5f);
-            float viewY = screenY;
-
-            // Normalisation 3D rapide (viewX et viewZ sont réutilisés)
-            float dot = viewX*viewX + viewY*viewY + viewZ*viewZ;
-            float invLen = FastInvSqrt(dot);
-
-            // Seul viewY (vViewTS_y) dépend réellement de 'y' après normalisation complète
-            float normViewX = viewX * invLen;
-            float normViewY = viewY * invLen;
-            float normViewZ = viewZ * invLen;
-
-            // Recalcul local à cause du changement de normalisation 3D par pixel
-            float localTS_x = normViewX * tangentX + normViewZ * tangentZ;
-            float localTS_z = normViewX * hit.nx   + normViewZ * hit.ny;
-            float localSafeZ = fmaxf(fabsf(localTS_z), 0.05f);
-
-            float vParallaxOffsetX = (localSafeZ > 0.01f) ? (localTS_x / localSafeZ) * parallaxScale : 0.0f;
-            vParallaxOffsetX = fmaxf(-8.0f, fminf(8.0f, vParallaxOffsetX));
-
-            int numLayers = PARALLAX_STEPS_MIN + (int)(fabsf(vParallaxOffsetX) * PARALLAX_STEPS_MAX);
-            if (numLayers > 250) numLayers = 250;
-
-            float layerDepth = 1.0f / numLayers;
-            
-            // DeltaTex final par pixel avec la normalisation corrigée
-            Vec2 deltaTex = {
-                faceSignX * localTS_x * parallaxScale / (localSafeZ * numLayers),
-                faceSignY * normViewY * parallaxScale / (localSafeZ * numLayers)
-            };
-
-            float currentTexX     = hit.texX;
-            float currentTexY     = texPos;
-            float currentHeight   = 1.0f;
-            float currentLayerDepth = 1.0f;
-            float prevTexX        = currentTexX;
-            float prevTexY        = currentTexY;
-            float prevHeight      = 1.0f;
-            float prevLayerDepth  = 1.0f;
-
-            // Marche de rayons (Raymarching de la Heightmap)
-            for (int i = 0; i < numLayers; i++)
-            {
-                prevTexX        = currentTexX;
-                prevTexY        = currentTexY;
-                prevHeight      = currentHeight;
-                prevLayerDepth  = currentLayerDepth;
-
-                currentTexX -= deltaTex.x;
-                currentTexY -= deltaTex.y;
-
-                float wrappedX = currentTexX - floorf(currentTexX);
-                float wrappedY = currentTexY - floorf(currentTexY);
-
-                int sampleX = (int)(wrappedX * ctx->texW);
-                int sampleY = (int)(wrappedY * ctx->texH);
-
-                sampleX = fmaxf(0, fminf(ctx->texW - 1, sampleX));
-                sampleY = fmaxf(0, fminf(ctx->texH - 1, sampleY));
-
-                currentHeight      = ctx->wallHeight[sampleY * ctx->texW + sampleX].r / 255.0f;
-                currentLayerDepth -= layerDepth;
-
-                if (currentHeight >= currentLayerDepth) break;
-            }
-
-            // ── Interpolation POM ────────────────────────────────────────
-            float afterDepth  = currentHeight - currentLayerDepth;
-            float beforeDepth = prevHeight    - prevLayerDepth;
-            float denom  = afterDepth - beforeDepth;
-            float weight = (fabsf(denom) > 0.0001f) ? afterDepth / denom : 0.0f;
-            weight = fmaxf(0.0f, fminf(1.0f, weight));
-
-            float finalTexXf = prevTexX * weight + currentTexX * (1.0f - weight);
-            finalTexXf -= floorf(finalTexXf);
-
-            float finalTexYf = prevTexY * weight + currentTexY * (1.0f - weight);
-            finalTexYf -= floorf(finalTexYf);
-
-            // ── Échantillonnage bilinéaire ───────────────────────────────
-            Color s = SampleBilinear(ctx->wallPixels, ctx->texW,  ctx->texH,  finalTexXf, finalTexYf);
-            Color n = SampleBilinear(ctx->wallNormal, ctx->normW, ctx->normH, finalTexXf, finalTexYf);
-
-            // ── Normal mapping ───────────────────────────────────────────
-            float nnx = (n.r / 255.0f) * 2.0f - 1.0f;
-            float nny = (n.g / 255.0f) * 2.0f - 1.0f;
-            float nnz = (n.b / 255.0f) * 2.0f - 1.0f;
-
-            float outR = AMBIENT_LIGHT, outG = AMBIENT_LIGHT, outB = AMBIENT_LIGHT;
-
-            // Boucle d'éclairage et self-shadowing 
-            for (int i = 0; i < numLights; i++) {
-                if (!lc[i].active) continue;
-
-                float finalHeight = SampleHeight(ctx->wallHeight, ctx->heightW, ctx->heightH, finalTexXf, finalTexYf);
-                
-                float ldx = lc[i].ldx;
-                float ldy = lc[i].ldy;
-                float ldz = lc[i].ldz; 
-
-                float lightTexX = ldx * tangentX + ldy * tangentZ;
-                float lightTexY = -ldz; 
-                float lightWallDepth = ldx * hit.nx + ldy * hit.ny;
-                float safeDepth = fmaxf(fabsf(lightWallDepth), 0.05f);
-
-                Vec2 shadowDelta = {
-                    (lightTexX / safeDepth) * parallaxScale,
-                    (lightTexY / safeDepth) * parallaxScale
-                };
-
-                shadowDelta.x = fmaxf(-0.5f, fminf(0.5f, shadowDelta.x));
-                shadowDelta.y = fmaxf(-0.5f, fminf(0.5f, shadowDelta.y));
-
-                float heightStep = 1.0f / (float)SHADOW_STEPS;
-                float shadowBias = 0.02f; 
-
-                float shadowTexX   = finalTexXf + shadowDelta.x * shadowBias;
-                float shadowTexY   = finalTexYf + shadowDelta.y * shadowBias;
-                float shadowHeight = finalHeight + shadowBias;
-                float shadow = 1.0f;
-
-                for(int s_step = 0; s_step < SHADOW_STEPS; s_step++)
-                {
-                    shadowTexX += shadowDelta.x * heightStep;
-                    shadowTexY += shadowDelta.y * heightStep;
-                    shadowHeight += heightStep;
-
-                    if(shadowHeight >= 1.0f) break; 
-
-                    float u = shadowTexX - floorf(shadowTexX);
-                    float v = shadowTexY - floorf(shadowTexY);
-                    float sampleH = SampleHeight(ctx->wallHeight, ctx->heightW, ctx->heightH, u, v);
-
-                    if(sampleH > shadowHeight)
-                    {
-                        float distanceIntoWall = sampleH - shadowHeight;
-                        float distanceFactor = 1.0f - (float)s_step / SHADOW_STEPS;
-                        //float distanceFactor = 1.0f;
-                        shadow = fmaxf(0.35f, 1.0f - (distanceIntoWall * 5.0f * distanceFactor)); 
-                        break;
-                    }
-                }
-
-                float diff = fmaxf(0.0f, nnx*ldx + nny*ldy + nnz*ldz);
-                outR += diff * shadow * lc[i].atten * lc[i].r;
-                outG += diff * shadow * lc[i].atten * lc[i].g;
-                outB += diff * shadow * lc[i].atten * lc[i].b;
-            }
-
-            // ── Couleur finale ───────────────────────────────────────────
-            Color finalColor = s;
-            if (hit.wallType == 3) finalColor = MixColor(s, WHITE, 0.5f);
-            if (hit.wallType == 4) finalColor = MixColor(s, RED,   0.5f);
-            if (hit.wallType == 5) finalColor = MixColor(s, GREEN, 0.5f);
-            if (hit.wallType == 2) finalColor = MixColor(s, GOLD,  0.7f);
-
-            for (int step = 0; step < COL_STEP && (col + step) < renderW; step++) {
-                ctx->framebuffer[y * renderW + (col + step)] = (Color){
-                    (unsigned char)fminf(255.0f, finalColor.r * outR),
-                    (unsigned char)fminf(255.0f, finalColor.g * outG),
-                    (unsigned char)fminf(255.0f, finalColor.b * outB),
-                    255
-                };
-            }
-        }
-    }
-}
-
-
 // =============================================================
 //  Fonction de rendu à utiliser dans RenderFrame
 // =============================================================
@@ -1904,7 +1542,12 @@ float* RenderWallPixelShader(Context* ctx, float px, float py, float angle, floa
     for(int col = 0; col < renderW; col++)
     {
         float ray_angle = angle + rayOffset[col];
-        RayHit hit = cast_ray_dda(px, py, ray_angle, angle);
+
+        #if RAYCASTER_TYPE
+            RayHit hit = cast_ray_dda(px, py, ray_angle, angle);
+        #else
+            RayHit hit = cast_ray_raymarching(px, py, ray_angle, angle);
+        #endif
 
         if(hit.dist<0.01f)
             hit.dist=0.01f;
@@ -2447,8 +2090,7 @@ int main(void)
         SetShaderValue(shader, locParallaxScale, &parallaxScale,                 SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, locMinSamples,    (int[1]){PARALLAX_STEPS_MIN},   SHADER_UNIFORM_INT);
         SetShaderValue(shader, locMaxSamples,    (int[1]){PARALLAX_STEPS_MAX},   SHADER_UNIFORM_INT);
-        float n = 1.0f;
-        SetShaderValue(shader, locNormalStrength, &n,                            SHADER_UNIFORM_FLOAT);
+        SetShaderValue(shader, locNormalStrength, &normalStrength,               SHADER_UNIFORM_FLOAT);
         float playerPos[2]={px,py};        
         SetShaderValue(shader,locPlayer,playerPos,                               SHADER_UNIFORM_VEC2);        
         

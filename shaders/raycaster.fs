@@ -178,10 +178,10 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
       vec3 vHalf    = normalize(vLightTS + vViewTSN);
 
       // Shininess — plus élevé = reflet plus petit et net, plus bas = reflet large et doux
-      float shininess = 4.0;  // 32 = brillant, 4-8 = mat/rugueux
+      float shininess = 64.0;  // 32 = brillant, 4-8 = mat/rugueux
 
       // Puissance du spec — multiplicateur de l'intensité
-      float specStrength = 0.01;  // 0.3 = fort, 0.05-0.1 = subtil
+      float specStrength = 0.3;  // 0.3 = fort, 0.05-0.1 = subtil
       float spec = pow(max(0.0, dot(vNormal, vHalf)), shininess) * specStrength;
 
       //outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0;
@@ -263,8 +263,8 @@ void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_
       vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
       vLightTS.z = abs(vLightTS.z);
 
-      //shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
-      shadows[i] = 1;
+      shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
+      //shadows[i] = 1;
    }
 
    resultingColor = ComputeIllumination(finalTexCoords, vViewTS, worldPos, normal, wallType, shadows);
@@ -326,6 +326,9 @@ void main()
    vec2 parallaxOffset = vec2(signedOffsetHorizontal, offsetVertical);
    //vec2 parallaxOffset = vec2(signedOffsetHorizontal, 0.0);
 
-   parallaxOcclusionMapping(vec2(d.texX, texY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   float tileTexX = d.texX * tiling.x;
+   float tileTexY = texY * tiling.y;
+
+   parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
    //resultingColor= texture( u_diffuseTexture, vec2(d.texX,texY));
 }
