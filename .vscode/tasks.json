@@ -1,0 +1,29 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cppbuild",
+			"label": "build raylib raycaster",
+			"command": "F:/Cplusplus/ucrt64/bin/gcc.exe",
+			"args": [
+			"-g",
+			"-O3",
+			"-I", "F:/C++/raylib-6.0/include",
+			"${workspaceFolder}/raycaster.c",
+			"-o", "raycaster.exe",
+			"-static", "-static-libgcc", "-static-libstdc++",
+			"-L", "F:/C++/raylib-6.0/lib",
+			"-lraylib", "-lwinmm", "-lgdi32", "-lopengl32", "-luser32", "-lkernel32",
+			"-lpthread"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build",
+			"detail": "compiler: F:/Cplusplus/ucrt64/bin/gcc.exe"
+		}
+	]
+}

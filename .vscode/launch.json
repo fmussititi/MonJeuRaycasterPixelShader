@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Raycaster (UCRT64)",
+            "type": "cppdbg",
+            "request": "launch",
+
+            // Exécutable compilé
+            "program": "${workspaceFolder}/raycaster.exe",
+
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+
+            // GDB fourni par MSYS2 UCRT64
+            "miDebuggerPath": "F:/Cplusplus/ucrt64/bin/gdb.exe",
+
+            "externalConsole": false,
+            "MIMode": "gdb",
+
+            "setupCommands": [
+                {
+                    "description": "Activer l'affichage pretty-print pour GDB",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Désactiver la pagination GDB",
+                    "text": "set pagination off",
+                    "ignoreFailures": true
+                }
+            ],
+
+            // Compiler avant de lancer
+            "preLaunchTask": "build raylib raycaster"
+        }
+    ]
+}
