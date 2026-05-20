@@ -73,54 +73,68 @@ WallData loadWall()
     return d;
 }
 
-// Equivalent de ComputeIllumination
-vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 normal)
+vec3 ApplyWallTypeTint(vec3 c, float wallType)
 {
-    vec3 vNormal  = texture(u_normalTexture, texSample).rgb * 2.0 - 1.0;
-    vNormal.xy   *= normalStrength;
-    vNormal        = normalize(vNormal);
+    // les wallType arrivent en float depuis la texture
+    int t = int(wallType + 0.5);
 
-    vec3 vDiffuse = texture(u_diffuseTexture, texSample).rgb;
-    vec3 outColor = vec3(0.08) * vDiffuse;  // ambient
+    if(t == 3) c = mix(c, vec3(1.0),                 0.5); // WHITE
+    if(t == 4) c = mix(c, vec3(1.0,0.0,0.0),         0.5); // RED
+    if(t == 5) c = mix(c, vec3(0.0,1.0,0.0),         0.5); // GREEN
+    if(t == 2) c = mix(c, vec3(1.0,0.84,0.0),        0.7); // GOLD
 
-    vec2 tangent = vec2(-normal.y, normal.x);
+    return c;
+}
 
-    for (int i = 0; i < MAX_LIGHTS; i++)
-    {
-        if (i >= numLights) break;
+// Equivalent de ComputeIllumination
+vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 normal, in float wallType)
+{
+   vec3 vNormal  = texture(u_normalTexture, texSample).rgb * 2.0 - 1.0;
+   vNormal.xy   *= normalStrength;
+   vNormal        = normalize(vNormal);
 
-        vec2 L2 = lightPos[i].xy - worldPos;
-        float dist2 = dot(L2, L2);
-        float radius = lightRadius[i];
-        if (dist2 > radius * radius) continue;
+   vec3 vDiffuse = texture(u_diffuseTexture, texSample).rgb;
+   vDiffuse = ApplyWallTypeTint(vDiffuse, wallType);
+   vec3 outColor = vec3(0.08) * vDiffuse;  // ambient
 
-        float dist = sqrt(dist2);
+   vec2 tangent = vec2(-normal.y, normal.x);
 
-        // Atténuation
-        float Kc = 1.0, Kl = 2.0/radius, Kq = 7.0/(radius*radius);
-        float atten = 1.0 / (Kc + Kl*dist + Kq*dist2);
-        float fade  = 1.0 - dist/radius;
-        atten *= max(fade, 0.0);
+   for (int i = 0; i < MAX_LIGHTS; i++)
+   {
+      if (i >= numLights) break;
 
-        // Direction lumière en tangent space
-        vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
-        vLightTS.z    = abs(vLightTS.z);
+      vec2 L2 = lightPos[i].xy - worldPos;
+      float dist2 = dot(L2, L2);
+      float radius = lightRadius[i];
+      if (dist2 > radius * radius) continue;
 
-        float NdotL = max(0.0, dot(vNormal, vLightTS));
+      float dist = sqrt(dist2);
 
-        vec3 vViewTSN = normalize(vViewTS);
-        vec3 vHalf    = normalize(vLightTS + vViewTSN);
-        float spec    = pow(max(0.0, dot(vNormal, vHalf)), 32.0) * 0.3;
+      // Atténuation
+      float Kc = 1.0, Kl = 2.0/radius, Kq = 7.0/(radius*radius);
+      float atten = 1.0 / (Kc + Kl*dist + Kq*dist2);
+      float fade  = 1.0 - dist/radius;
+      atten *= max(fade, 0.0);
 
-        outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0;
-        outColor += vec3(spec) * atten * lightColor[i];
-    }
+      // Direction lumière en tangent space
+      vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
+      vLightTS.z    = abs(vLightTS.z);
 
-    return vec4(clamp(outColor, 0.0, 1.0), 1.0);
+      float NdotL = max(0.0, dot(vNormal, vLightTS));
+
+      vec3 vViewTSN = normalize(vViewTS);
+      vec3 vHalf    = normalize(vLightTS + vViewTSN);
+      float spec    = pow(max(0.0, dot(vNormal, vHalf)), 32.0) * 0.3;
+
+      outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0;
+      outColor += vec3(spec) * atten * lightColor[i];
+   }   
+
+   return vec4(clamp(outColor, 0.0, 1.0), 1.0);
 }
 
 
-void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS, in vec2 worldPos, in vec2 normal)
+void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS, in vec2 worldPos, in vec2 normal, in float wallType)
 {
    vec3 vViewTS   = normalize(o_vViewTS);
    //vec3 vLightTS  = normalize(o_vLightTS);
@@ -186,7 +200,7 @@ void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_
 
    float shadowMultiplier = 1;
 
-   resultingColor = ComputeIllumination(finalTexCoords, vViewTS, worldPos, normal);
+   resultingColor = ComputeIllumination(finalTexCoords, vViewTS, worldPos, normal, wallType);
 }
 
 
@@ -243,6 +257,6 @@ void main()
    //vec2 parallaxOffset = vec2(signedOffsetHorizontal, offsetVertical);
    vec2 parallaxOffset = vec2(signedOffsetHorizontal, 0.0);
 
-   parallaxOcclusionMapping(vec2(d.texX, texY), viewTS, parallaxOffset, d.worldPos, d.normal);
+   parallaxOcclusionMapping(vec2(d.texX, texY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
    //resultingColor= texture( u_diffuseTexture, vec2(d.texX,texY));
 }

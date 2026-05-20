@@ -2447,7 +2447,7 @@ int main(void)
         SetShaderValue(shader, locParallaxScale, &parallaxScale,                 SHADER_UNIFORM_FLOAT);
         SetShaderValue(shader, locMinSamples,    (int[1]){PARALLAX_STEPS_MIN},   SHADER_UNIFORM_INT);
         SetShaderValue(shader, locMaxSamples,    (int[1]){PARALLAX_STEPS_MAX},   SHADER_UNIFORM_INT);
-        float n = 0.2f;
+        float n = 1.0f;
         SetShaderValue(shader, locNormalStrength, &n,                            SHADER_UNIFORM_FLOAT);
         float playerPos[2]={px,py};        
         SetShaderValue(shader,locPlayer,playerPos,                               SHADER_UNIFORM_VEC2);        
@@ -2520,7 +2520,8 @@ int main(void)
         sprintf(timerBuf, "%02d:%02d", s / 60, s % 60);
         DrawText(timerBuf, SCREEN_W/2 - 30, 10, 24, WHITE);
 
-        DrawText("ZQSD / Fleches : se deplacer", 10, SCREEN_H - 25, 14, GRAY);
+        //DrawText("ZQSD / Fleches : se deplacer", 10, SCREEN_H - 25, 14, GRAY);
+        DrawText( TextFormat( "%dx%d / render %dx%d",  SCREEN_W, SCREEN_H, renderW, renderH), 10,  SCREEN_H - 25, 14, YELLOW);
 
         // ----- HUD Pulse -----
         if (pulseRadius > 0.0f)
@@ -2545,9 +2546,7 @@ int main(void)
             // Décroissance
             pulseRadius -= 60.0f * GetFrameTime();
             if (pulseRadius < 0.0f) pulseRadius = 0.0f;
-        }
-
-        DrawText( TextFormat( "%dx%d / render %dx%d",  SCREEN_W, SCREEN_H, renderW, renderH), 10,  40,  20, YELLOW);
+        }        
         
         EndDrawing();
     }
