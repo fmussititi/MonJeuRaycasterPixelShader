@@ -35,9 +35,9 @@ int renderWcpu, renderHcpu, halfRenderHcpu;
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
 #define TEX_TILE 2.0f
-#define PARALLAX_STEPS_MIN 64
-#define PARALLAX_STEPS_MAX 150
-#define PARALLAX_SCALE 0.1f
+#define PARALLAX_STEPS_MIN 100
+#define PARALLAX_STEPS_MAX 250
+#define PARALLAX_SCALE 0.10f
 
 // ----- Carte du labyrinthe -----
 // 1 = mur, 0 = couloir
@@ -50,11 +50,11 @@ int renderWcpu, renderHcpu, halfRenderHcpu;
 #define PATROL_LIGHTS  (NUM_LIGHTS - 1)
 #define AMBIENT_LIGHT 0.03f
 #define TORCHE_RADIUS 2.5f
-#define TORCHE_PUISSANCE 0.8f
+#define TORCHE_PUISSANCE 1.8f
 #define TORCHE_DISTANCE 0.3f
 
 // Paramètres bloom des sprites light patrols
-#define BLOOM_PASSES  7      // nombre de passes (1 = pas de bloom)
+#define BLOOM_PASSES  2      // nombre de passes (1 = pas de bloom)
 #define BLOOM_SPREAD  2      // écartement en pixels
 #define BLOOM_ALPHA   0.3f   // intensité du halo
 
@@ -77,7 +77,7 @@ bool playSoundOneTime = true;
 bool playBeepSound = true;
 float pulseRadius = 0.0f;
 float parallaxScale = PARALLAX_SCALE;
-float normalStrength = 2.0f;
+float normalStrength = 0.1f;
 
 typedef enum { STATE_PLAY, STATE_WIN, STATE_LOST, STATE_LOST_BY_CHASING, STATE_MAZE_NOT_READY } GameState;
 GameState gameState = STATE_PLAY;
