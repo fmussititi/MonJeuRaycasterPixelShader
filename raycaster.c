@@ -20,6 +20,7 @@
 
 int SCREEN_W, SCREEN_H, HALF_H;
 int renderW, renderH, halfRenderH;
+int renderWcpu, renderHcpu, halfRenderHcpu;
 
 // ----- Configuration du joueur -----
 #define MOVE_SPEED   3.0f       // cases/seconde
@@ -28,8 +29,8 @@ int renderW, renderH, halfRenderH;
 
 // ------ Parametres de qualite/performance du rendu ------
 #define RENDER_SCALE 1.0 // 1 = natif, 2 = moitié, 4 = quart
+#define RENDER_SCALE_CPU 3.0 // 1 = natif, 2 = moitié, 4 = quart
 #define COL_STEP 1
-#define FXAA 0
 #define RAYCASTER_TYPE 1 // RAYMARCHING = 0 / DDA = 1
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
@@ -139,8 +140,8 @@ typedef struct {
     Texture2D texDiffuse, texNormal, texHeight;
     Texture2D wallDataTex;
     float *wallDataBuf;
-    Color *framebuffer, *framebuffersprites, *tmpFxaa;
-    Texture2D screenTex;
+    Color *framebuffer, *framebuffersprites;
+    Texture2D screenTex, screenTex2;
     Color *wallPixels;
     int texW, texH;
     Color *wallNormal;
@@ -178,7 +179,6 @@ RayHit cast_ray_dda(float px, float py, float angle, float player_angle);
 RayHit cast_ray_raymarching(float px, float py, float ray_angle, float player_angle);
 Sound CreateBeep(void);
 void BeepDependsOnExitDistance(Sound beep, int px, int py);
-void apply_fxaa(Color *fb, Color *tmp, int w, int h);
 void KeysAndJoypadHandler(float* angle, float* px, float* py, float dt);
 void draw_minimap(float px, float py, float angle);
 typedef struct { float x, y; } Vec2;
@@ -342,41 +342,6 @@ void draw_minimap(float px, float py, float angle)
                 lpx + (int)(patrolLights[i].dx * 8),
                 lpy + (int)(patrolLights[i].dy * 8),
                 lc);
-    }
-}
-
-void apply_fxaa(Color *fb, Color *tmp, int w, int h)
-{
-    memcpy(tmp, fb, w * h * sizeof(Color));
-
-    for (int y = 1; y < h - 1; y++)
-    for (int x = 1; x < w - 1; x++)
-    {
-        Color c  = tmp[y*w + x];
-        Color n  = tmp[(y-1)*w + x];
-        Color s  = tmp[(y+1)*w + x];
-        Color e  = tmp[y*w + x+1];
-        Color ww = tmp[y*w + x-1];
-
-        // Détection de contour (luminance)
-        float lC = 0.299f*c.r  + 0.587f*c.g  + 0.114f*c.b;
-        float lN = 0.299f*n.r  + 0.587f*n.g  + 0.114f*n.b;
-        float lS = 0.299f*s.r  + 0.587f*s.g  + 0.114f*s.b;
-        float lE = 0.299f*e.r  + 0.587f*e.g  + 0.114f*e.b;
-        float lW = 0.299f*ww.r + 0.587f*ww.g + 0.114f*ww.b;
-
-        float edge = fabsf(lN-lS) + fabsf(lE-lW);
-
-        if (edge > 8.0f)  // seuil — ajuster selon le rendu
-        {
-            // Moyenne des voisins sur les contours
-            fb[y*w + x] = (Color){
-                (c.r + n.r + s.r + e.r + ww.r) / 5,
-                (c.g + n.g + s.g + e.g + ww.g) / 5,
-                (c.b + n.b + s.b + e.b + ww.b) / 5,
-                255
-            };
-        }
     }
 }
 #pragma endregion
@@ -1313,12 +1278,14 @@ void KeysAndJoypadHandler(float* angle, float* px, float* py, float dt)
 // =============================================================
 
 void RenderFloorCeil(Context* ctx, float px, float py, float angle, int horizon){
-    memset(ctx->framebuffer, 0, renderW * renderH * sizeof(Color));
+
+    memset(ctx->framebuffer, 0, renderWcpu * renderHcpu * sizeof(Color));
+
     // Sol/plafond par ligne
-    for (int y = 0; y < renderH; y++)
+    for (int y = 0; y < renderHcpu; y++)
     {
         bool is_floor = (y > horizon);
-        float row_dist = (float)halfRenderH / fabsf(y - horizon + 0.0001f);
+        float row_dist = (float)halfRenderHcpu / fabsf(y - horizon + 0.0001f);
         float fog = 1.0f - fminf(row_dist / 12.0f, 1.0f);
 
         // Position centrale de la ligne (pour calculer l'éclairage de la ligne)
@@ -1357,12 +1324,12 @@ void RenderFloorCeil(Context* ctx, float px, float py, float angle, int horizon)
 
         float rayL = angle - FOV / 2.0f;
         float rayR = angle + FOV / 2.0f;
-        float floorStepX = (LUTcos(rayR) - LUTcos(rayL)) * row_dist / renderW;
-        float floorStepY = (LUTsin(rayR) - LUTsin(rayL)) * row_dist / renderW;
+        float floorStepX = (LUTcos(rayR) - LUTcos(rayL)) * row_dist / renderWcpu;
+        float floorStepY = (LUTsin(rayR) - LUTsin(rayL)) * row_dist / renderWcpu;
         float floorX = px + LUTcos(rayL) * row_dist;
         float floorY = py + LUTsin(rayL) * row_dist;
 
-        for (int x = 0; x < renderW; x++, floorX += floorStepX, floorY += floorStepY)
+        for (int x = 0; x < renderWcpu; x++, floorX += floorStepX, floorY += floorStepY)
         {
             int tx, ty;
             Color base;
@@ -1375,7 +1342,7 @@ void RenderFloorCeil(Context* ctx, float px, float py, float angle, int horizon)
                 ty = (int)(fabsf(fmodf(floorY, 1.0f)) * ctx->texCeilH) % ctx->texCeilH;
                 base = ctx->ceilPixels[ty * ctx->texCeilW + tx];
             }
-            ctx->framebuffer[y * renderW + x] = (Color){
+            ctx->framebuffer[y * renderWcpu + x] = (Color){
                 (unsigned char)(base.r * fR * fog),
                 (unsigned char)(base.g * fG * fog),
                 (unsigned char)(base.b * fB * fog),
@@ -1848,6 +1815,8 @@ int main(void)
 
     SCREEN_W = 1920;
     SCREEN_H = 1080;
+    //SCREEN_W = 1280;
+    //SCREEN_H = 720;
     HALF_H   = SCREEN_H / 2;
 
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
@@ -1855,12 +1824,15 @@ int main(void)
 
     HideCursor();
 
-    // Calcul de la résolution de rendu
+    // Calcul de la résolution de rendu GPU
     renderW = SCREEN_W / RENDER_SCALE;
     renderH = SCREEN_H / RENDER_SCALE;
-    //renderW = 1280;
-    //renderH = 720;
     halfRenderH = renderH / 2;
+
+    // Calcul de la résolution de rendu CPU
+    renderWcpu = SCREEN_W / RENDER_SCALE_CPU;
+    renderHcpu = SCREEN_W / RENDER_SCALE_CPU;
+    halfRenderHcpu = renderHcpu / 2;
 
     Image imgWall = LoadImage("Wall2.png");
     ImageFormat(&imgWall, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
@@ -1909,15 +1881,19 @@ int main(void)
     Color *spritePixels = LoadImageColors(imgSprite);
     UnloadImage(imgSprite);
 
-    Color *framebuffer = malloc(renderW * renderH * sizeof(Color));
+    Color *framebuffer = malloc(renderWcpu * renderHcpu * sizeof(Color));
     Color *framebuffersprites = malloc(renderW * renderH * sizeof(Color));
     float *zBuffer = malloc(renderW * sizeof(float));
-    Color *tmpFxaa = malloc(renderW * renderH * sizeof(Color));
 
-    Image img = GenImageColor(renderW, renderH, BLACK);
+    Image img = GenImageColor(renderWcpu, renderHcpu, BLACK);
     ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
     Texture2D screenTex = LoadTextureFromImage(img);
     UnloadImage(img);
+
+    Image img2 = GenImageColor(renderW, renderH, BLACK);
+    ImageFormat(&img2, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    Texture2D screenTex2 = LoadTextureFromImage(img2);
+    UnloadImage(img2);
 
     // Textures à créer pour pixel shader
     // 1. On crée un tableau de float vide (3 lignes de pixels, chaque pixel a 4 canaux R, G, B, A)
@@ -1950,8 +1926,9 @@ int main(void)
     ctx.texHeight = texHeight;
     ctx.wallDataTex = wallDataTex;
     ctx.wallDataBuf = wallDataBuf;
-    ctx.framebuffer = framebuffer, ctx.framebuffersprites = framebuffersprites, ctx.tmpFxaa = tmpFxaa;
+    ctx.framebuffer = framebuffer, ctx.framebuffersprites = framebuffersprites;
     ctx.screenTex = screenTex;
+    ctx.screenTex2 = screenTex2;
     ctx.wallPixels = wallPixels;
     ctx.texW = texW, ctx.texH = texH;
     ctx.wallNormal = wallNormal;
@@ -2099,11 +2076,9 @@ int main(void)
         int horizon = halfRenderH + (int)pitch;
         UpdateTexture(ctx.wallDataTex, RenderWallPixelShader(&ctx, px, py, angle, rayOffset,horizon));
 
-#if FXAA
-        apply_fxaa(ctx.framebuffer, ctx.tmpFxaa, renderW, renderH);
-#endif
         BeginBlendMode(BLEND_ALPHA);
-        RenderFloorCeil(&ctx, px, py, angle, horizon);        
+        int horizonCpu = halfRenderHcpu + (int)(pitch * (renderHcpu / (float)renderH));
+        RenderFloorCeil(&ctx, px, py, angle, horizonCpu);        
 
         // 2. Upload le framebuffer comme texture de fond
         UpdateTexture(ctx.screenTex, ctx.framebuffer);
@@ -2111,7 +2086,7 @@ int main(void)
         // 3. Dessine le fond CPU
         DrawTexturePro(
             ctx.screenTex,
-            (Rectangle){0, 0, renderW, renderH},
+            (Rectangle){0, 0, renderWcpu, renderHcpu},
             (Rectangle){0, 0, SCREEN_W, SCREEN_H},
             (Vector2){0, 0}, 0.0f, WHITE
         );
@@ -2136,11 +2111,11 @@ int main(void)
 
         RenderSprites(&ctx, px, py, angle);
         // 2. Upload le framebuffersprites comme texture de sprites
-        UpdateTexture(ctx.screenTex, ctx.framebuffersprites);
+        UpdateTexture(ctx.screenTex2, ctx.framebuffersprites);
         
         // 3. Dessine les sprites
         DrawTexturePro(
-            ctx.screenTex,
+            ctx.screenTex2,
             (Rectangle){0, 0, renderW, renderH},
             (Rectangle){0, 0, SCREEN_W, SCREEN_H},
             (Vector2){0, 0}, 0.0f, WHITE
@@ -2203,7 +2178,6 @@ int main(void)
     free(framebuffer);
     free(framebuffersprites);
     free(zBuffer);
-    free(tmpFxaa);
     CloseWindow();
     return 0;
 }
