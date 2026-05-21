@@ -565,6 +565,141 @@ void contactRefinementParallaxOcclusionMapping(in vec2  o_texcoords, in vec3  o_
    resultingColor = ComputeIllumination(finalUV, normalize(o_vViewTS), worldPos, normal, wallType, shadows);
 }
 
+
+// -------------------------------------------------------
+// Contact Refinement Parallax Mapping Shadows — Riccardi 2019
+// Adapté depuis ParallaxOcclusionMapping.cginc (Unity)
+// Erreur : 1/(numLayers²) au lieu de 1/numLayers
+// -------------------------------------------------------
+float riccardi_soft_shadow(
+   in vec3  tsLightRay,
+   in vec2  shadowUV,
+   in float current_depth,       // heightmap au point d'intersection
+   in float current_layer_depth, // profondeur du rayon
+   in float totalLayers,         // numLayers original
+   in float layer_depth)         // layer_depth remis à l'échelle
+{
+   // Adaptatif : seulement les layers entre le fragment et la surface
+   // (équivalent exact de : layerN = round(current_layer_depth * layerN))
+   float layerN = max(1.0, round(current_layer_depth * totalLayers));
+
+   // Delta UV vers la lumière — même formule que delta_uv du POM
+   float safeZ = max(abs(tsLightRay.z), 0.01);
+   vec2 shadow_delta_uv = (tsLightRay.xy / safeZ) * parallaxScale / totalLayers;
+
+   vec2  uv           = shadowUV;
+   float shadow_samples = 0.0;
+   float shadow_factor  = 0.0;
+
+   for (int j = 0; j < g_nMaxSamples; j++)
+   {
+      if (float(j) >= layerN) break;
+
+      if (current_layer_depth > current_depth)
+      {
+         shadow_samples += 1.0;
+         // Amplitude × atténuation par distance (penombre)
+         shadow_factor = max(shadow_factor, (current_depth - current_layer_depth) * (1.0 - float(j + 1) / layerN));
+      }
+
+      // Avance vers la lumière
+      uv              -= shadow_delta_uv;
+      current_depth    = texture(u_heightTexture, uv).r;
+      current_layer_depth += layer_depth;
+   }
+
+   // 0 samples sous surface → pleine lumière (1.0)
+   // sinon → ombre proportionnelle
+   return mix(1.0, 1.0 - shadow_factor, sign(shadow_samples));
+}
+
+vec2 contactRefinementPOMShadows(
+   vec2  texCoords,
+   vec3  vViewTS,
+   out float out_currentDepth,      // hauteur heightmap au point final
+   out float out_currentLayerDepth, // profondeur du rayon au point final
+   out float out_layerDepth,        // layer_depth après raffinement
+   out vec2  out_deltaUV)           // delta_uv après raffinement
+{
+   vec3 V = normalize(vViewTS);
+
+   float numLayers = mix(float(g_nMaxSamples), float(g_nMinSamples), abs(V.z));
+
+   float layer_depth = 1.0 / numLayers;
+   float current_layer_depth = 1.0;
+
+   vec2  delta_uv = (V.xy * parallaxScale) / numLayers;
+   vec2  uv       = texCoords;
+
+   float current_depth = texture(u_heightTexture, uv).r;
+
+   // ---- Phase 1 : marche grossière ----
+   for (int i = 0; i < g_nMaxSamples; i++)
+   {
+      if (current_layer_depth <= current_depth) break;
+      uv                -= delta_uv;
+      current_depth      = texture(u_heightTexture, uv).r;
+      current_layer_depth -= layer_depth;
+   }
+
+   // ---- Phase 2 : Contact Refinement ----
+   // Recule d'un step
+   uv                  += delta_uv;
+   current_depth        = texture(u_heightTexture, uv).r;
+   current_layer_depth += layer_depth;
+
+   // Divise précision par numLayers
+   delta_uv   /= numLayers;
+   layer_depth /= numLayers;
+
+   for (int i = 0; i < g_nMaxSamples; i++)
+   {
+      if (current_layer_depth <= current_depth) break;
+      uv                  -= delta_uv;
+      current_depth        = texture(u_heightTexture, uv).r;
+      current_layer_depth -= layer_depth;
+   }
+
+   // Expose l'état interne pour les ombres
+   out_currentDepth      = current_depth;
+   out_currentLayerDepth = current_layer_depth;
+   // layer_depth *= numLayers : remet à l'échelle originale (cf. Riccardi)
+   out_layerDepth        = layer_depth * numLayers;
+   out_deltaUV           = delta_uv;
+
+   return uv;
+}
+
+
+void contactRefinement_POM_Shadows(in vec2 o_texcoords,in vec3 o_vViewTS,in vec2 parallaxOffset,in vec2 worldPos,in vec2 normal,in float wallType)
+{
+    // POM + état interne exposé pour les ombres
+    float currentDepth, currentLayerDepth, layerDepth;
+    vec2  deltaUV;
+
+    vec2 finalUV = contactRefinementPOMShadows(o_texcoords, o_vViewTS,currentDepth, currentLayerDepth, layerDepth, deltaUV);
+
+    float totalLayers = mix(float(g_nMaxSamples), float(g_nMinSamples),
+                            abs(normalize(o_vViewTS).z));
+
+    vec2  tangent = vec2(-normal.y, normal.x);
+    float shadows[MAX_LIGHTS];
+
+    for (int i = 0; i < MAX_LIGHTS; i++)
+    {
+        if (i >= numLights) { shadows[i] = 1.0; continue; }
+
+        vec2 L2       = lightPos[i].xy - worldPos;
+        vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
+        vLightTS.z = abs(vLightTS.z);
+
+        shadows[i] = riccardi_soft_shadow(vLightTS, finalUV, currentDepth, currentLayerDepth, totalLayers, layerDepth);
+    }
+
+    resultingColor = ComputeIllumination(finalUV, normalize(o_vViewTS), worldPos, normal, wallType, shadows);
+}
+
+
 void main()
 {
    WallData d = loadWall();
@@ -622,10 +757,11 @@ void main()
    float tileTexX = d.texX * tiling.x;
    float tileTexY = texY * tiling.y;
 
-   //steepParallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
-   //parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
-   contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
    //parallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
    //parallaxMappingOffsetLimiting(vec2(tileTexX, tileTexY), viewTS, vec2(faceSign * viewTS.x * parallaxScale, 0.0), d.worldPos, d.normal, d.wallType);
    //iterativeParallaxMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), vec2(0.0, 0.0), d.worldPos, d.normal, d.wallType);
+   //steepParallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
+   contactRefinement_POM_Shadows(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
 }
