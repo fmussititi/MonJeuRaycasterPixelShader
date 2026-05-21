@@ -226,11 +226,11 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
       float shininess = 32.0;  // 32 = brillant, 4-8 = mat/rugueux
 
       // Puissance du spec — multiplicateur de l'intensité
-      float specStrength = 0.5;  // 0.3 = fort, 0.05-0.1 = subtil
+      float specStrength = 0.1;  // 0.3 = fort, 0.05-0.1 = subtil
       float spec = pow(max(0.0, dot(vNormal, vHalf)), shininess) * specStrength;
 
-      float shadow = pow(shadows[i], 2.0);
-      //float shadow = mix(0.45, 1.0, shadows[i]);
+      //float shadow = pow(shadows[i], 2.0);
+      float shadow = mix(0.45, 1.0, shadows[i]);
       //outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0 * shadow;
       outColor += vDiffuse * NdotL * atten * lightColor[i] * shadow;
       outColor += vec3(spec) * atten * lightColor[i] * shadow;
@@ -308,8 +308,8 @@ void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_
       vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
       vLightTS.z = abs(vLightTS.z);
 
-      shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
-      //shadows[i] = parallaxSelfShadow(vLightTS, finalTexCoords, parallaxHeight, parallaxScale);
+      //shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
+      shadows[i] = parallaxSelfShadow(vLightTS, finalTexCoords, parallaxHeight, parallaxScale);
       //shadows[i] = 1;
    }
 
@@ -760,6 +760,6 @@ void main()
    //iterativeParallaxMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), vec2(0.0, 0.0), d.worldPos, d.normal, d.wallType);
    //steepParallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
    //parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
-   //contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
-   contactRefinement_POM_Shadows(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
+   contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //contactRefinement_POM_Shadows(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
 }

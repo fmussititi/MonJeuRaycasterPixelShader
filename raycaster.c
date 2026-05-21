@@ -35,8 +35,8 @@ int renderWcpu, renderHcpu, halfRenderHcpu;
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
 #define TEX_TILE 2.0f
-#define PARALLAX_STEPS_MIN 32
-#define PARALLAX_STEPS_MAX 64
+#define PARALLAX_STEPS_MIN 64
+#define PARALLAX_STEPS_MAX 128
 #define PARALLAX_SCALE 0.25f
 
 // ----- Carte du labyrinthe -----
@@ -1970,7 +1970,7 @@ int main(void)
 
     SetTextureFilter(texDiffuse, TEXTURE_FILTER_TRILINEAR);
     SetTextureFilter(texNormal,  TEXTURE_FILTER_TRILINEAR);
-    SetTextureFilter(texHeight,  TEXTURE_FILTER_TRILINEAR);
+    SetTextureFilter(texHeight,  TEXTURE_FILTER_POINT);
     
     SetTextureWrap(texDiffuse, TEXTURE_WRAP_REPEAT);
     SetTextureWrap(texNormal, TEXTURE_WRAP_REPEAT);
