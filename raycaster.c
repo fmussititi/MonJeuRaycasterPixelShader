@@ -77,7 +77,7 @@ bool playSoundOneTime = true;
 bool playBeepSound = true;
 float pulseRadius = 0.0f;
 float parallaxScale = PARALLAX_SCALE;
-float normalStrength = 0.1f;
+float normalStrength = 3.0f;
 
 typedef enum { STATE_PLAY, STATE_WIN, STATE_LOST, STATE_LOST_BY_CHASING, STATE_MAZE_NOT_READY } GameState;
 GameState gameState = STATE_PLAY;

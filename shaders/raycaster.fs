@@ -104,8 +104,10 @@ float parallaxSoftShadowMultiplier(in vec3 L, in vec2 initialTexCoord,
 
       // Step de la lumière proportionnel au parallax offset
       float lightAngle = max(L.z, 0.01);
-      vec2 texStep = vec2(L.x, -L.y) * length(parallaxOffset) 
-                     / (numLayers * lightAngle);
+      
+      float shadowScale = max(length(parallaxOffset), parallaxScale * 0.3);
+
+      vec2 texStep = vec2(L.x, -L.y) * shadowScale / (numLayers * lightAngle);
 
       float currentLayerHeight   = initialHeight - layerHeight;
       vec2  currentTextureCoords = initialTexCoord + texStep;
@@ -225,8 +227,8 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
       float specStrength = 0.3;  // 0.3 = fort, 0.05-0.1 = subtil
       float spec = pow(max(0.0, dot(vNormal, vHalf)), shininess) * specStrength;
 
-      //float shadow = pow(shadows[i], 4.0);
-      float shadow = mix(0.45, 1.0, shadows[i]);
+      float shadow = pow(shadows[i], 4.0);
+      //float shadow = mix(0.45, 1.0, shadows[i]);
       //outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0 * shadow;
       outColor += vDiffuse * NdotL * atten * lightColor[i] * shadow;
       outColor += vec3(spec) * atten * lightColor[i] * shadow;
@@ -556,8 +558,8 @@ void contactRefinementParallaxOcclusionMapping(in vec2  o_texcoords, in vec3  o_
       vLightTS.z    = abs(vLightTS.z);
 
       //float startH = texture(u_heightTexture, finalUV).r;
-      shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalUV, rayH, offset);
-      //shadows[i] = parallaxSelfShadow(vLightTS, finalUV, rayH, parallaxScale);
+      //shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalUV, rayH, offset);
+      shadows[i] = parallaxSelfShadow(vLightTS, finalUV, rayH, parallaxScale);
    }
 
    resultingColor = ComputeIllumination(finalUV, normalize(o_vViewTS), worldPos, normal, wallType, shadows);
