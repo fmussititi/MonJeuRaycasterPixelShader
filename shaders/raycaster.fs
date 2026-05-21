@@ -74,6 +74,8 @@ WallData loadWall()
     return d;
 }
 
+
+
 vec3 ApplyWallTypeTint(vec3 c, float wallType)
 {
    // les wallType arrivent en float depuis la texture
@@ -221,13 +223,13 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
       vec3 vHalf    = normalize(vLightTS + vViewTSN);
 
       // Shininess — plus élevé = reflet plus petit et net, plus bas = reflet large et doux
-      float shininess = 64.0;  // 32 = brillant, 4-8 = mat/rugueux
+      float shininess = 32.0;  // 32 = brillant, 4-8 = mat/rugueux
 
       // Puissance du spec — multiplicateur de l'intensité
-      float specStrength = 0.3;  // 0.3 = fort, 0.05-0.1 = subtil
+      float specStrength = 0.5;  // 0.3 = fort, 0.05-0.1 = subtil
       float spec = pow(max(0.0, dot(vNormal, vHalf)), shininess) * specStrength;
 
-      float shadow = pow(shadows[i], 4.0);
+      float shadow = pow(shadows[i], 2.0);
       //float shadow = mix(0.45, 1.0, shadows[i]);
       //outColor += vDiffuse * NdotL * atten * lightColor[i] * 2.0 * shadow;
       outColor += vDiffuse * NdotL * atten * lightColor[i] * shadow;
@@ -574,20 +576,18 @@ void contactRefinementParallaxOcclusionMapping(in vec2  o_texcoords, in vec3  o_
 float riccardi_soft_shadow(
    in vec3  tsLightRay,
    in vec2  shadowUV,
-   in float current_depth,       // heightmap au point d'intersection
-   in float current_layer_depth, // profondeur du rayon
-   in float totalLayers,         // numLayers original
-   in float layer_depth)         // layer_depth remis à l'échelle
+   in float current_depth,
+   in float current_layer_depth,
+   in float totalLayers,
+   in float layer_depth)
 {
-   // Adaptatif : seulement les layers entre le fragment et la surface
-   // (équivalent exact de : layerN = round(current_layer_depth * layerN))
-   float layerN = max(1.0, round(current_layer_depth * totalLayers));
+   // (1.0 - current_layer_depth) = profondeur relative dans convention height
+   float layerN = max(1.0, round((1.0 - current_layer_depth) * totalLayers));
 
-   // Delta UV vers la lumière — même formule que delta_uv du POM
    float safeZ = max(abs(tsLightRay.z), 0.01);
    vec2 shadow_delta_uv = (tsLightRay.xy / safeZ) * parallaxScale / totalLayers;
 
-   vec2  uv           = shadowUV;
+   vec2  uv             = shadowUV;
    float shadow_samples = 0.0;
    float shadow_factor  = 0.0;
 
@@ -598,18 +598,16 @@ float riccardi_soft_shadow(
       if (current_layer_depth > current_depth)
       {
          shadow_samples += 1.0;
-         // Amplitude × atténuation par distance (penombre)
-         shadow_factor = max(shadow_factor, (current_depth - current_layer_depth) * (1.0 - float(j + 1) / layerN));
+         shadow_factor = max(shadow_factor,
+             (current_layer_depth - current_depth)     // ← corrigé
+             * (1.0 - float(j + 1) / layerN));
       }
 
-      // Avance vers la lumière
-      uv              -= shadow_delta_uv;
-      current_depth    = texture(u_heightTexture, uv).r;
-      current_layer_depth += layer_depth;
+      uv                  -= shadow_delta_uv;
+      current_depth        = texture(u_heightTexture, uv).r;
+      current_layer_depth += layer_depth;              // ← remonte vers la lumière
    }
 
-   // 0 samples sous surface → pleine lumière (1.0)
-   // sinon → ombre proportionnelle
    return mix(1.0, 1.0 - shadow_factor, sign(shadow_samples));
 }
 
