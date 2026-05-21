@@ -35,9 +35,9 @@ int renderWcpu, renderHcpu, halfRenderHcpu;
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
 #define TEX_TILE 2.0f
-#define PARALLAX_STEPS_MIN 100
-#define PARALLAX_STEPS_MAX 250
-#define PARALLAX_SCALE 0.10f
+#define PARALLAX_STEPS_MIN 32
+#define PARALLAX_STEPS_MAX 64
+#define PARALLAX_SCALE 0.25f
 
 // ----- Carte du labyrinthe -----
 // 1 = mur, 0 = couloir

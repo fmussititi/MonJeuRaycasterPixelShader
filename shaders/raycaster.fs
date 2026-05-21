@@ -304,14 +304,264 @@ void parallaxOcclusionMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_
       vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
       vLightTS.z = abs(vLightTS.z);
 
-      //shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
-      shadows[i] = parallaxSelfShadow(vLightTS, finalTexCoords, parallaxHeight, parallaxScale);
+      shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalTexCoords, parallaxHeight, o_vParallaxOffsetTS);
+      //shadows[i] = parallaxSelfShadow(vLightTS, finalTexCoords, parallaxHeight, parallaxScale);
       //shadows[i] = 1;
    }
 
    resultingColor = ComputeIllumination(finalTexCoords, vViewTS, worldPos, normal, wallType, shadows);
 }
 
+
+void parallaxMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS, in vec2 worldPos, in vec2 normal, in float wallType)
+{
+   vec3 vViewTS   = normalize(o_vViewTS);
+
+   // Sample la height map aux UV de base
+   float initialHeight = texture(u_heightTexture, o_texcoords).r;
+
+   // Utilise directement le parallax offset précalculé dans le VS
+   // multiplié par la height — plus la surface est haute, plus elle se décale
+   vec2 texCoordOffset = o_vParallaxOffsetTS * initialHeight;
+
+   // UV déplacés
+   vec2 texSample = o_texcoords + texCoordOffset;
+
+
+   // Self-shadow par lumière
+   float shadows[MAX_LIGHTS];
+   for (int i = 0; i < MAX_LIGHTS; i++)
+      shadows[i] = 1;
+
+   // Calcul de la couleur finale
+   resultingColor = ComputeIllumination(texSample, vViewTS, worldPos, normal, wallType, shadows);
+}
+
+
+void parallaxMappingOffsetLimiting(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS, in vec2 worldPos, in vec2 normal, in float wallType)
+{
+   vec3 vViewTS = normalize(o_vViewTS);
+
+   // --- Parallax Mapping with Offset Limiting ---
+   // Au lieu de diviser par viewTS.z (instable aux angles rasants),
+   // on utilise directement viewTS.xy — l'offset est naturellement borné.
+   float initialHeight = texture(u_heightTexture, o_texcoords).r;
+
+   // Offset limiting : on ne divise PAS par z, ce qui évite l'explosion
+   // aux angles rasants. L'offset est proportionnel à height * xy seulement.
+   //vec2 texCoordOffset = parallaxScale * initialHeight * vViewTS.xy;
+   vec2 texCoordOffset = initialHeight * o_vParallaxOffsetTS;
+   // (pas de / vViewTS.z ici — c'est le "limiting")
+
+   vec2 texSample = o_texcoords + texCoordOffset;
+
+   float shadows[MAX_LIGHTS];
+   for (int i = 0; i < MAX_LIGHTS; i++)
+      shadows[i] = 1.0;
+
+   resultingColor = ComputeIllumination(texSample, vViewTS, worldPos, normal, wallType, shadows);
+}
+
+
+// -------------------------------------------------------
+// Iterative Parallax Mapping with Slope Information
+// Premecz 2006 — offset limiting variant
+// -------------------------------------------------------
+// Pour de bons résultats, u_normalTexture doit stocker la
+// hauteur dans son canal alpha (packed normal+height map).
+// Si tu n'as pas ça, on fallback sur u_heightTexture.
+// -------------------------------------------------------
+
+vec2 iterParallaxMapping(vec2 texCoords, vec3 vViewTS)
+{
+   // On normalise le vecteur vue (tangent space)
+   // PAS de division par z — c'est l'offset limiting de Premecz
+   vec3 V = normalize(vViewTS);
+
+   vec2  uv          = texCoords;
+   float currentH    = 0.0;   // hauteur du point courant sur le rayon
+
+   const int ITERATIONS = 4;  // 3-4 suffisent selon le paper (270 FPS vs 345 pour 1)
+
+   for (int i = 0; i < ITERATIONS; i++)
+   {
+      // Lit la normale et la hauteur au point courant
+      vec3  N_sample = texture(u_normalTexture, uv).rgb * 2.0 - 1.0;
+      float h_map    = texture(u_heightTexture, uv).r;
+
+      float bumpScale = 0.035;
+      // SCALE + BIAS appliqués sur la hauteur
+      float h = h_map * bumpScale + (bumpScale * -0.5);
+
+      // Nz = composante Z de la normale lue = cosinus de l'angle local
+      // Plus la surface est inclinée, plus Nz est petit → offset réduit
+      float Nz = N_sample.z;  // dans [0,1] après unpack, ~1 si surface plate
+
+      // Formule de Premecz (eq. itérative, offset limiting = pas de /Vz) :
+      // uv[i+1] = uv[i] + (h - currentH) * Nz * V.xy
+      uv       += (h - currentH) * Nz * V.xy;
+      currentH += (h - currentH) * Nz * V.z;  // mise à jour de la hauteur courante
+   }
+
+   return uv;
+}
+
+void iterativeParallaxMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS,
+                     in vec2 worldPos, in vec2 normal, in float wallType)
+{   
+   vec2 finalUV = iterParallaxMapping(o_texcoords, o_vViewTS);
+
+   float shadows[MAX_LIGHTS];
+   for (int i = 0; i < MAX_LIGHTS; i++)
+      shadows[i] = 1.0;
+
+   resultingColor = ComputeIllumination(finalUV, normalize(o_vViewTS), worldPos, normal, wallType, shadows);
+}
+
+
+void steepParallaxMapping(in vec2 o_texcoords, in vec3 o_vViewTS, in vec2 o_vParallaxOffsetTS, in vec2 worldPos, in vec2 normal, in float wallType)
+{
+   vec3 vViewTS   = normalize(o_vViewTS);
+
+   // Nombre de layers adaptatif
+   float numLayers = mix(float(g_nMaxSamples), float(g_nMinSamples), 
+                        abs(vViewTS.z));  // tangent space, pas world space
+
+   float layerHeight        = 1.0 / numLayers;
+   float currentLayerHeight = 1.0;
+
+   // Utilise o_vParallaxOffsetTS précalculé dans le VS
+   // au lieu de V.xy / V.z / numLayers
+   vec2 dtex = -o_vParallaxOffsetTS / numLayers;
+
+   vec2 currentTextureCoords = o_texcoords;
+   float heightFromTexture   = texture(u_heightTexture, currentTextureCoords).r;
+
+   // for borné au lieu de while
+   for (int i = 0; i < g_nMaxSamples; i++)
+   {
+      if (heightFromTexture > currentLayerHeight) break;
+      currentLayerHeight    -= layerHeight;
+      currentTextureCoords  += dtex;
+      heightFromTexture      = texture(u_heightTexture, currentTextureCoords).r;
+   }
+
+   float parallaxHeight = currentLayerHeight;
+
+   // Self-shadow par lumière
+   vec2 tangent = vec2(-normal.y, normal.x);
+   float shadows[MAX_LIGHTS];
+
+   for (int i = 0; i < MAX_LIGHTS; i++)
+   {
+      if (i >= numLights) { shadows[i] = 1.0; continue; }
+
+      vec2 L2 = lightPos[i].xy - worldPos;
+      vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
+      vLightTS.z = abs(vLightTS.z);
+
+      //shadows[i] = parallaxSoftShadowMultiplier(vLightTS, currentTextureCoords, parallaxHeight, o_vParallaxOffsetTS);
+      shadows[i] = parallaxSelfShadow(vLightTS, currentTextureCoords, parallaxHeight, parallaxScale);
+      //shadows[i] = 1;
+   }
+
+   // Calcul de la couleur finale
+   resultingColor = ComputeIllumination(currentTextureCoords, vViewTS, worldPos, normal, wallType, shadows);
+}
+
+
+// -------------------------------------------------------
+// Contact Refinement Parallax Mapping — Riccardi 2019
+// Adapté depuis ParallaxOcclusionMapping.cginc (Unity)
+// Erreur : 1/(numLayers²) au lieu de 1/numLayers
+// -------------------------------------------------------
+
+// Phase de ray marching générique — utilisée deux fois :
+// une fois grossière, une fois fine sur l'intervalle trouvé.
+// Retourne les UV à l'intersection.
+vec2 raytraceLoop(
+   vec2        startUV,
+   vec2        deltaUV,        // offset UV par step
+   float       deltaH,         // descente en hauteur par step
+   int         steps,
+   inout float currentH,       // hauteur du rayon (mise à jour)
+   inout float mapH)           // hauteur de la heightmap (mise à jour)
+{
+   vec2 uv = startUV;
+
+   for (int i = 0; i < steps; i++)
+   {
+      // On est sous la surface → on s'arrête
+      if (currentH <= mapH) break;
+
+      uv       -= deltaUV;
+      currentH -= deltaH;
+      mapH      = texture(u_heightTexture, uv).r;
+   }
+   return uv;
+}
+
+
+vec2 contactRefinementPOM(vec2 texCoords, vec3 vViewTS, out float rayH)
+{
+   vec3 V = normalize(vViewTS);
+
+   // Nombre de steps adaptatif selon l'angle
+   float numLayers = mix(float(g_nMaxSamples), float(g_nMinSamples), abs(V.z));
+
+   // Delta UV et delta hauteur par step (offset limiting : pas de /z)
+   // On utilise parallaxScale comme facteur global
+   vec2  deltaUV = (V.xy * parallaxScale) / numLayers;
+   float deltaH  = 1.0 / numLayers;
+
+   // ---- Phase 1 : marche grossière ----
+   vec2  uv       = texCoords;
+   float currentH = 1.0;                        // rayon part du sommet
+   float mapH     = texture(u_heightTexture, uv).r;
+
+   uv = raytraceLoop(uv, deltaUV, deltaH, int(numLayers), currentH, mapH);
+
+   // ---- Phase 2 : raffinement sur l'intervalle [step-1, step] ----
+   // Recule d'un step — on repasse au-dessus de la surface
+   uv       += deltaUV;
+   currentH += deltaH;
+   mapH      = texture(u_heightTexture, uv).r;
+
+   // Divise la précision par numLayers → erreur finale 1/N²
+   float refineDelta = deltaH  / numLayers;
+   vec2  refineUV    = deltaUV / numLayers;
+
+   uv = raytraceLoop(uv, refineUV, refineDelta, int(numLayers), currentH, mapH);
+
+   rayH = currentH;
+   return uv;
+}
+
+
+void contactRefinementParallaxOcclusionMapping(in vec2  o_texcoords, in vec3  o_vViewTS, in vec2 offset, in vec2 worldPos, in vec2 normal, in float wallType)
+{
+   float rayH;
+   vec2 finalUV = contactRefinementPOM(o_texcoords, o_vViewTS, rayH);
+
+   // Self-shadow (réutilise parallaxSelfShadow existant)
+   vec2  tangent = vec2(-normal.y, normal.x);
+   float shadows[MAX_LIGHTS];
+
+   for (int i = 0; i < MAX_LIGHTS; i++)
+   {
+      if (i >= numLights) { shadows[i] = 1.0; continue; }
+
+      vec2 L2       = lightPos[i].xy - worldPos;
+      vec3 vLightTS = normalize(vec3(dot(L2, tangent), 0.0, dot(L2, normal)));
+      vLightTS.z    = abs(vLightTS.z);
+
+      //float startH = texture(u_heightTexture, finalUV).r;
+      shadows[i] = parallaxSoftShadowMultiplier(vLightTS, finalUV, rayH, offset);
+      //shadows[i] = parallaxSelfShadow(vLightTS, finalUV, rayH, parallaxScale);
+   }
+
+   resultingColor = ComputeIllumination(finalUV, normalize(o_vViewTS), worldPos, normal, wallType, shadows);
+}
 
 void main()
 {
@@ -360,7 +610,6 @@ void main()
    if(d.side==1 && d.normal.y<0) faceSign=-1.0f;
    if(d.side==1 && d.normal.y>0) faceSign= 1.0f;
 
-   //float signedOffsetHorizontal = faceSign * (dot(V, tangent) > 0.0 ? 1.0 : -1.0) * clamp(abs((viewTS.x / max(abs(viewTS.z), 0.1)) * parallaxScale), 0.0, 0.3);
    float localSafeZ = max(abs(viewTS.z), 0.05);
    float signedOffsetHorizontal = faceSign * (viewTS.x / localSafeZ) * parallaxScale;
    float offsetVertical = (viewTS.y / localSafeZ) * parallaxScale;
@@ -371,6 +620,10 @@ void main()
    float tileTexX = d.texX * tiling.x;
    float tileTexY = texY * tiling.y;
 
-   parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
-   //resultingColor= texture( u_diffuseTexture, vec2(d.texX,texY));
+   //steepParallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //parallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //parallaxMappingOffsetLimiting(vec2(tileTexX, tileTexY), viewTS, vec2(faceSign * viewTS.x * parallaxScale, 0.0), d.worldPos, d.normal, d.wallType);
+   //iterativeParallaxMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), vec2(0.0, 0.0), d.worldPos, d.normal, d.wallType);
 }
