@@ -223,10 +223,10 @@ vec4 ComputeIllumination(vec2 texSample, vec3 vViewTS, vec2 worldPos, vec2 norma
       vec3 vHalf    = normalize(vLightTS + vViewTSN);
 
       // Shininess — plus élevé = reflet plus petit et net, plus bas = reflet large et doux
-      float shininess = 32.0;  // 32 = brillant, 4-8 = mat/rugueux
+      float shininess = 4.0;  // 32 = brillant, 4-8 = mat/rugueux
 
       // Puissance du spec — multiplicateur de l'intensité
-      float specStrength = 0.1;  // 0.3 = fort, 0.05-0.1 = subtil
+      float specStrength = 0.05;  // 0.3 = fort, 0.05-0.1 = subtil
       float spec = pow(max(0.0, dot(vNormal, vHalf)), shininess) * specStrength;
 
       //float shadow = pow(shadows[i], 2.0);
@@ -393,7 +393,7 @@ vec2 iterParallaxMapping(vec2 texCoords, vec3 vViewTS)
       vec3  N_sample = texture(u_normalTexture, uv).rgb * 2.0 - 1.0;
       float h_map    = texture(u_heightTexture, uv).r;
 
-      float bumpScale = 0.035;
+      float bumpScale = 0.010;
       // SCALE + BIAS appliqués sur la hauteur
       float h = h_map * bumpScale + (bumpScale * -0.5);
 
@@ -707,59 +707,62 @@ void main()
    if(y<d.top || y>d.bottom)
       discard;
 
-   float wallHeight=d.bottom-d.top;
+   float wallHeight = d.bottom - d.top;
 
-   if(wallHeight<=0.0)
-      wallHeight=1.0;
+   if(wallHeight <= 0.0)
+      wallHeight = 1.0;
 
-   vec2 tangent = vec2(-d.normal.y,d.normal.x);
+   float wall_h_real = d.bottom - d.top;
 
-   // direction horizontale du rayon
-   vec2 V = normalize(d.worldPos-playerPos);
-
-   float wall_h_real=d.bottom-d.top;
-
-   if(wall_h_real<1.0)
-      wall_h_real=1.0;
-
-   // même formule que ton soft
-   float screenY = (y-(d.top+wall_h_real*0.5)) / (wall_h_real*0.5);
-   float viewY = -screenY;
+   if(wall_h_real < 1.0)
+      wall_h_real = 1.0;
 
    // reconstruction UV verticale
    float texY = (y - d.top) / wallHeight;
    texY = clamp(texY, 0.0, 1.0);
 
+
+
+   vec2 tangent = vec2(-d.normal.y,d.normal.x);
+
+   // direction horizontale du rayon
+   vec2 V = normalize(d.worldPos - playerPos);
+
+   // même formule que ton soft
+   float screenY = (y - (d.top + wall_h_real * 0.5)) / (wall_h_real * 0.5);
+   float viewY = screenY;
+
    // reconstruction direction caméra 3D
    vec3 viewDir =  normalize( vec3( V.x, viewY, V.y ));
 
    // projection tangent-space
-   vec3 viewTS= vec3( dot(viewDir.xz,tangent), viewDir.y, dot(viewDir.xz,d.normal));
+   vec3 viewTS = vec3( dot(viewDir.xz,tangent), viewDir.y, dot(viewDir.xz,d.normal));
 
-   //vec2 parallaxOffset = vec2(d.offset,0);
-  
-   float faceSign=1.0f;
+   float faceSignX = 1.0f;
+   if(d.side==0 && d.normal.x<0) faceSignX = 1.0f;
+   if(d.side==0 && d.normal.x>0) faceSignX =-1.0f;
+   if(d.side==1 && d.normal.y<0) faceSignX =-1.0f;
+   if(d.side==1 && d.normal.y>0) faceSignX = 1.0f;
 
-   if(d.side==0 && d.normal.x<0) faceSign= 1.0f;
-   if(d.side==0 && d.normal.x>0) faceSign=-1.0f;
-   if(d.side==1 && d.normal.y<0) faceSign=-1.0f;
-   if(d.side==1 && d.normal.y>0) faceSign= 1.0f;
+   float faceSignY = -1.0f;
+
+   viewTS = vec3(faceSignX * viewTS.x, faceSignY * viewTS.y, viewTS.z);
 
    float localSafeZ = max(abs(viewTS.z), 0.05);
-   float signedOffsetHorizontal = faceSign * (viewTS.x / localSafeZ) * parallaxScale;
-   float offsetVertical = (viewTS.y / localSafeZ) * parallaxScale;
+   float OffsetHorizontal = (viewTS.x / localSafeZ) * parallaxScale;
+   float offsetVertical   = (viewTS.y / localSafeZ) * parallaxScale;
 
-   vec2 parallaxOffset = vec2(signedOffsetHorizontal, offsetVertical);
+   vec2 parallaxOffset = vec2(OffsetHorizontal, offsetVertical);
    //vec2 parallaxOffset = vec2(signedOffsetHorizontal, 0.0);
 
    float tileTexX = d.texX * tiling.x;
    float tileTexY = texY * tiling.y;
 
-   //parallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
-   //parallaxMappingOffsetLimiting(vec2(tileTexX, tileTexY), viewTS, vec2(faceSign * viewTS.x * parallaxScale, 0.0), d.worldPos, d.normal, d.wallType);
-   //iterativeParallaxMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), vec2(0.0, 0.0), d.worldPos, d.normal, d.wallType);
+   //parallaxMapping(vec2(tileTexX, tileTexY), viewTS, vec2((viewTS.x / localSafeZ) * 0.05, (viewTS.y / localSafeZ) * 0.05), d.worldPos, d.normal, d.wallType);
+   //parallaxMappingOffsetLimiting(vec2(tileTexX, tileTexY), viewTS, vec2(viewTS.x * 0.1, 0.0), d.worldPos, d.normal, d.wallType);
+   //iterativeParallaxMapping(vec2(tileTexX, tileTexY), viewTS, vec2(0.0, 0.0), d.worldPos, d.normal, d.wallType);
    //steepParallaxMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
    //parallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
-   contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
-   //contactRefinement_POM_Shadows(vec2(tileTexX, tileTexY), vec3(faceSign * viewTS.x, viewTS.y, viewTS.z), parallaxOffset, d.worldPos, d.normal, d.wallType);
+   contactRefinementParallaxOcclusionMapping(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
+   //contactRefinement_POM_Shadows(vec2(tileTexX, tileTexY), viewTS, parallaxOffset, d.worldPos, d.normal, d.wallType);
 }

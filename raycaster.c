@@ -35,9 +35,9 @@ int renderWcpu, renderHcpu, halfRenderHcpu;
 #define RAYMARCHING_STEP_SIZE 0.001f // Taille du pas (plus c'est petit, plus c'est précis, mais plus c'est lent)
 #define RAYMARCHING_RAY_LIMIT 10.0f
 #define TEX_TILE 2.0f
-#define PARALLAX_STEPS_MIN 64
-#define PARALLAX_STEPS_MAX 128
-#define PARALLAX_SCALE 0.25f
+#define PARALLAX_STEPS_MIN 16
+#define PARALLAX_STEPS_MAX 32
+#define PARALLAX_SCALE 0.1f
 
 // ----- Carte du labyrinthe -----
 // 1 = mur, 0 = couloir
@@ -51,7 +51,7 @@ int renderWcpu, renderHcpu, halfRenderHcpu;
 #define AMBIENT_LIGHT 0.03f
 #define TORCHE_RADIUS 2.5f
 #define TORCHE_PUISSANCE 1.8f
-#define TORCHE_DISTANCE 0.3f
+#define TORCHE_DISTANCE 0.2f
 
 // Paramètres bloom des sprites light patrols
 #define BLOOM_PASSES  2      // nombre de passes (1 = pas de bloom)
@@ -1257,8 +1257,8 @@ void KeysAndJoypadHandler(float* angle, float* px, float* py, float dt)
         traceOn = !traceOn;
     }
 
-    if (IsKeyDown(KEY_KP_ADD)) parallaxScale += 0.01f;
-    if (IsKeyDown(KEY_KP_SUBTRACT)) parallaxScale -= 0.01f;
+    if (IsKeyDown(KEY_KP_ADD)) parallaxScale += 0.001f;
+    if (IsKeyDown(KEY_KP_SUBTRACT)) parallaxScale -= 0.001f;
 
     if (parallaxScale < 0.0f) parallaxScale = 0.0f;
     if (parallaxScale > 1.3f) parallaxScale = 1.3f;
@@ -1970,7 +1970,7 @@ int main(void)
 
     SetTextureFilter(texDiffuse, TEXTURE_FILTER_TRILINEAR);
     SetTextureFilter(texNormal,  TEXTURE_FILTER_TRILINEAR);
-    SetTextureFilter(texHeight,  TEXTURE_FILTER_POINT);
+    SetTextureFilter(texHeight,  TEXTURE_FILTER_TRILINEAR);
     
     SetTextureWrap(texDiffuse, TEXTURE_WRAP_REPEAT);
     SetTextureWrap(texNormal, TEXTURE_WRAP_REPEAT);
